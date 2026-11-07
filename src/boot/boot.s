@@ -64,9 +64,9 @@ disk_packet:
 boot_drive:
     .byte 0
 boot_message:
-    .asciz "Hello from Boot!\r\n" ; idk
+    .asciz "Hello from Boot!\r\n" # idk
 error_message:
-    .asciz "Disk read failed.\r\n" ; we're cooked
+    .asciz "Disk read failed.\r\n" # we're cooked
 
 .align 8
 gdt:
