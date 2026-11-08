@@ -2,7 +2,7 @@ BUILD := build
 CC := gcc
 LD := ld
 OBJCOPY := objcopy
-KERNEL_SECTORS := 32
+MAX_KERNEL_SECTORS := 127
 IMAGE_SIZE := 1474560
 
 CXXFLAGS := -m32 -march=i386 -mno-sse -mno-mmx -msoft-float \
@@ -35,10 +35,24 @@ $(BUILD)/kernel.elf: $(BUILD)/kernel.o kernel.ld
 
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf
 	$(OBJCOPY) -O binary $< $@
-	test "$$(wc -c < $@)" -le $$(( $(KERNEL_SECTORS) * 512 ))
 
-$(BUILD)/goofos.img: $(BUILD)/boot.bin $(BUILD)/kernel.bin
+$(BUILD)/kernel_sectors.inc: $(BUILD)/kernel.bin
+	@sectors=$$(( ($$(wc -c < $<) + 511) / 512 )); \
+	if [ "$$sectors" -gt $(MAX_KERNEL_SECTORS) ]; then \
+		echo "Kernel exceeds the $(MAX_KERNEL_SECTORS)-sector BIOS loader limit" >&2; exit 1; \
+	fi; \
+	printf '.word %s\n' "$$sectors" > $@
+
+$(BUILD)/header.o: src/boot/header.s $(BUILD)/kernel_sectors.inc
+	$(CC) -m32 -c $< -o $@
+
+$(BUILD)/header.bin: $(BUILD)/header.o
+	$(OBJCOPY) -O binary $< $@
+	truncate -s 512 $@
+
+$(BUILD)/goofos.img: $(BUILD)/boot.bin $(BUILD)/header.bin $(BUILD)/kernel.bin
 	cp $(BUILD)/boot.bin $@
+	cat $(BUILD)/header.bin >> $@
 	cat $(BUILD)/kernel.bin >> $@
 	truncate -s $(IMAGE_SIZE) $@
 

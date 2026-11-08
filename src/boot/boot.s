@@ -19,9 +19,33 @@ boot_start:
     movw $boot_message, %si
     call print_string
 
-    /* load 32 sectors after this boot sector to 0x10000. */
+    /* read the sector-count header from ds1 to 0x8000. */
     movb boot_drive, %dl
     movw $disk_packet, %si
+    movw $1, disk_packet+2
+    movw $0, disk_packet+4
+    movw $0x0800, disk_packet+6
+    movl $1, disk_packet+8
+    movl $0, disk_packet+12
+    movb $0x42, %ah
+    int $0x13
+    jc disk_error
+
+    /* header is a 16-bit sector count, reject empty/oversized kernels. */
+    movw 0x8000, %ax
+    testw %ax, %ax
+    jz disk_error
+    cmpw $127, %ax
+    ja disk_error
+
+    /* load that many sectors from ds2 to 0x10000. */
+    movb boot_drive, %dl
+    movw $disk_packet, %si
+    movw %ax, disk_packet+2
+    movw $0, disk_packet+4
+    movw $0x1000, disk_packet+6
+    movl $2, disk_packet+8
+    movl $0, disk_packet+12
     movb $0x42, %ah
     int $0x13
     jc disk_error
@@ -56,9 +80,9 @@ halt16:
 disk_packet:
     .byte 0x10
     .byte 0
-    .word 32
+    .word 1
     .word 0
-    .word 0x1000
+    .word 0x0800
     .quad 1
 
 boot_drive:
