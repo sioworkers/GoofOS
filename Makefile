@@ -30,8 +30,11 @@ $(BUILD)/boot.bin: $(BUILD)/boot.elf
 $(BUILD)/kernel.o: src/kernel/kernel.cpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/kernel.elf: $(BUILD)/kernel.o kernel.ld
-	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(BUILD)/kernel.o
+$(BUILD)/kernel_entry.o: src/kernel/entry.s | $(BUILD)
+	$(CC) -m32 -c $< -o $@
+
+$(BUILD)/kernel.elf: $(BUILD)/kernel_entry.o $(BUILD)/kernel.o kernel.ld
+	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(BUILD)/kernel_entry.o $(BUILD)/kernel.o
 
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf
 	$(OBJCOPY) -O binary $< $@

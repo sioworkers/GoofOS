@@ -1,10 +1,16 @@
 OUTPUT_FORMAT(elf32-i386)
-ENTRY(kernel_main)
+ENTRY(kernel_entry)
 SECTIONS
 {
     . = 0x10000;
-    .text : { *(.text*) }
+    .text : { *(.text.boot) *(.text*) }
     .rodata : { *(.rodata*) }
     .data : { *(.data*) }
-    .bss : { *(COMMON) *(.bss*) }
+    .bss ALIGN(16) :
+    {
+        __bss_start = .;
+        *(COMMON)
+        *(.bss*)
+        __bss_end = .;
+    }
 }
