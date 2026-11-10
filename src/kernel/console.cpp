@@ -4,22 +4,34 @@ namespace {
     constexpr unsigned int width = 80;
     constexpr unsigned int height = 25;
     constexpr unsigned int screen_size = width * height;
-    constexpr unsigned short attribute = 0x0F00;
+    constexpr unsigned short attribute = 0x0F00; /* white on black */
     volatile unsigned short* const video = reinterpret_cast<volatile unsigned short*>(0xB8000);
-    unsigned int cursor = width;
+    unsigned int cursor = width; /* row 0 keeps the bootloader's message */
 
+    /**
+     * write one byte to an i/o port.
+     * @param port port number
+     * @param value byte to send
+     */
     void write_port(unsigned short port, unsigned char value) {
         asm volatile("outb %0, %1" : : "a"(value), "Nd"(port));
     }
 
+    /**
+     * move the hardware cursor to where our cursor is.
+     */
     void write_cursor() {
         const unsigned short position = static_cast<unsigned short>(cursor);
+        /* crtc registers 0x0F/0x0E hold the low/high cursor byte. */
         write_port(0x3D4, 0x0F);
         write_port(0x3D5, position & 0xFF);
         write_port(0x3D4, 0x0E);
         write_port(0x3D5, position >> 8);
     }
 
+    /**
+     * if the cursor went off the screen, shift every row up by one.
+     */
     void scroll_if_needed() {
         if (cursor < screen_size) {
             return;
@@ -28,12 +40,17 @@ namespace {
         for (unsigned int i = 0; i < screen_size - width; ++i) {
             video[i] = video[i + width];
         }
+        /* blank the new last row. */
         for (unsigned int i = screen_size - width; i < screen_size; ++i) {
             video[i] = attribute | ' ';
         }
         cursor -= width;
     }
 
+    /**
+     * draw one character at the cursor and advance it.
+     * @param character char to draw, or \n, \r, \b
+     */
     void put_char(char character) {
         if (character == '\n') {
             cursor += width - (cursor % width);

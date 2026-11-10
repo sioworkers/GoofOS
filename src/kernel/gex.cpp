@@ -5,22 +5,23 @@
 #include <cstdint>
 
 namespace {
+/* bytecode instructions, must match goofc. */
 enum Opcode : std::uint8_t {
-    push_i32 = 0x01,
-    load = 0x02,
-    store = 0x03,
-    input = 0x04,
+    push_i32 = 0x01,      /* i32 value: push it */
+    load = 0x02,          /* u8 var: push its value */
+    store = 0x03,         /* u8 var: pop into it */
+    input = 0x04,         /* u8 var: read an integer into it */
     add = 0x10,
     subtract = 0x11,
     multiply = 0x12,
     divide = 0x13,
     negate = 0x14,
-    output = 0x20,
-    print_text = 0x30,
-    input_line = 0x31,
-    match_text = 0x32,
-    jump_if_match = 0x33,
-    jump = 0x34,
+    output = 0x20,        /* pop and print as an integer */
+    print_text = 0x30,    /* u16 length + bytes: print them */
+    input_line = 0x31,    /* u8 var: read a line into it */
+    match_text = 0x32,    /* u8 var + u16 length + bytes: set condition if equal */
+    jump_if_match = 0x33, /* i32 offset: jump if condition is set */
+    jump = 0x34,          /* i32 offset: always jump */
     clear_screen = 0x35,
     halt = 0xFF,
 };
@@ -29,10 +30,16 @@ constexpr unsigned int max_variables = 255;
 constexpr unsigned int max_stack = 256;
 constexpr unsigned int max_line = 128;
 
+/* every variable has both an integer and a string slot. */
 std::int32_t values[max_variables];
 char strings[max_variables][max_line];
 std::int32_t stack[max_stack];
 
+/**
+ * print an error and stop the cpu.
+ * @param message what went wrong
+ * @return never
+ */
 [[noreturn]] void panic(const char* message) {
     console::write("gex error: ");
     console::write(message);
@@ -43,6 +50,13 @@ std::int32_t stack[max_stack];
     }
 }
 
+/**
+ * read a little-endian u16 from the bytecode.
+ * @param code bytecode
+ * @param length bytecode size
+ * @param pc read position, moved past the value
+ * @return the value
+ */
 std::uint16_t read_u16(const unsigned char* code, std::size_t length, std::size_t& pc) {
     if (pc + 2 > length) panic("truncated instruction");
     const std::uint16_t value = static_cast<std::uint16_t>(code[pc]) |
@@ -51,6 +65,13 @@ std::uint16_t read_u16(const unsigned char* code, std::size_t length, std::size_
     return value;
 }
 
+/**
+ * read a little-endian u32 from the bytecode.
+ * @param code bytecode
+ * @param length bytecode size
+ * @param pc read position, moved past the value
+ * @return the value
+ */
 std::uint32_t read_u32(const unsigned char* code, std::size_t length, std::size_t& pc) {
     if (pc + 4 > length) panic("truncated instruction");
     const std::uint32_t value = static_cast<std::uint32_t>(code[pc]) |
@@ -61,31 +82,54 @@ std::uint32_t read_u32(const unsigned char* code, std::size_t length, std::size_
     return value;
 }
 
+/**
+ * read one byte from the bytecode.
+ * @param code bytecode
+ * @param length bytecode size
+ * @param pc read position, moved past the byte
+ * @return the byte
+ */
 unsigned char read_byte(const unsigned char* code, std::size_t length, std::size_t& pc) {
     if (pc >= length) panic("truncated instruction");
     return code[pc++];
 }
 
+/**
+ * pop a value off the stack.
+ * @param sp stack pointer
+ * @return the popped value
+ */
 std::int32_t pop(unsigned int& sp) {
     if (sp == 0) panic("stack underflow");
     return stack[--sp];
 }
 
+/**
+ * push a value onto the stack.
+ * @param sp stack pointer
+ * @param value value to push
+ */
 void push(unsigned int& sp, std::int32_t value) {
     if (sp >= max_stack) panic("stack overflow");
     stack[sp++] = value;
 }
 
+/**
+ * print a signed integer in decimal.
+ * @param value number to print
+ */
 void print_integer(std::int32_t value) {
     char digits[12];
     unsigned int length = 0;
     std::uint32_t magnitude;
+    /* go unsigned so INT32_MIN doesn't overflow. */
     if (value < 0) {
         console::put_char('-');
         magnitude = 0u - static_cast<std::uint32_t>(value);
     } else {
         magnitude = static_cast<std::uint32_t>(value);
     }
+    /* digits come out backwards, so print them in reverse. */
     do {
         digits[length++] = static_cast<char>('0' + magnitude % 10);
         magnitude /= 10;
@@ -95,6 +139,10 @@ void print_integer(std::int32_t value) {
     }
 }
 
+/**
+ * read a line from the keyboard and parse it as an integer.
+ * @param variable variable to store it in
+ */
 void read_integer(std::uint8_t variable) {
     char line[max_line];
     unsigned int length = 0;
@@ -131,6 +179,10 @@ void read_integer(std::uint8_t variable) {
                                 : static_cast<std::int32_t>(value);
 }
 
+/**
+ * read a line from the keyboard into a string variable.
+ * @param variable variable to store it in
+ */
 void read_line(std::uint8_t variable) {
     unsigned int length = 0;
     for (;;) {
@@ -152,6 +204,12 @@ void read_line(std::uint8_t variable) {
     strings[variable][length] = '\0';
 }
 
+/**
+ * move pc by an offset, refusing to leave the bytecode.
+ * @param pc position right after the jump instruction
+ * @param code_size bytecode size
+ * @param offset how far to jump, can be negative
+ */
 void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) {
     const auto target = static_cast<std::int64_t>(pc) + offset;
     if (target < 0 || static_cast<std::uint64_t>(target) >= code_size) {
@@ -162,6 +220,7 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
 }
 
 [[noreturn]] void gex::run(const unsigned char* file, std::size_t size) {
+    /* header: "GOOF", u8 version, u8 variable count, u32 code size. */
     if (size < 10 || file[0] != 'G' || file[1] != 'O' || file[2] != 'O' || file[3] != 'F') {
         panic("invalid executable header");
     }
@@ -173,6 +232,7 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
                                   (static_cast<std::uint32_t>(file[9]) << 24);
     if (code_size > size - 10) panic("truncated executable");
 
+    /* start every program with clean variables. */
     for (unsigned int i = 0; i < max_variables; ++i) {
         values[i] = 0;
         strings[i][0] = '\0';
@@ -180,7 +240,7 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
     const auto* code = file + 10;
     std::size_t pc = 0;
     unsigned int sp = 0;
-    bool condition = false;
+    bool condition = false; /* set by match_text, used by jump_if_match */
 
     for (;;) {
         const auto opcode = read_byte(code, code_size, pc);
@@ -206,6 +266,7 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
             read_integer(variable);
             break;
         }
+        /* math is done unsigned so overflow wraps instead of being ub. */
         case add: {
             const auto right = static_cast<std::uint32_t>(pop(sp));
             const auto left = static_cast<std::uint32_t>(pop(sp));
@@ -228,6 +289,7 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
             const auto right = pop(sp);
             const auto left = pop(sp);
             if (right == 0) panic("division by zero");
+            /* INT32_MIN / -1 would trap, so just wrap it. */
             if (left == INT32_MIN && right == -1) push(sp, INT32_MIN);
             else push(sp, left / right);
             break;
@@ -264,6 +326,7 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
                    strings[variable][i] == static_cast<char>(code[pc + i])) {
                 ++i;
             }
+            /* equal only if both ended at the same spot. */
             condition = i == length && strings[variable][i] == '\0';
             pc += length;
             break;

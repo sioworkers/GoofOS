@@ -10,6 +10,7 @@
 #include <system_error>
 #include <vector>
 
+/* goofc: compiles .gof source into .gex bytecode for the kernel. */
 namespace {
 enum class TokenKind {
     identifier,
@@ -31,14 +32,22 @@ enum class TokenKind {
 struct Token {
     TokenKind kind;
     std::string text;
-    std::int64_t number = 0;
+    std::int64_t number = 0; /* only set for numbers */
     unsigned int line = 1;
 };
 
+/* turns source text into tokens. */
 class Lexer {
 public:
+    /**
+     * @param source whole .gof file
+     */
     explicit Lexer(std::string source) : source_(std::move(source)) {}
 
+    /**
+     * split the source into tokens.
+     * @return tokens, always ending with an end token
+     */
     std::vector<Token> scan() {
         std::vector<Token> tokens;
         while (position_ < source_.size()) {
@@ -49,6 +58,7 @@ public:
                 tokens.push_back({TokenKind::newline, "\\n", 0, line_++});
                 ++position_;
             } else if (c == '#' || c == ';') {
+                /* comment, skip to the end of the line. */
                 while (position_ < source_.size() && source_[position_] != '\n') {
                     ++position_;
                 }
@@ -67,12 +77,24 @@ public:
     }
 
 private:
+    /**
+     * @param c char to check
+     * @return true if c is an ascii letter
+     */
     static bool is_alpha(char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     }
 
+    /**
+     * @param c char to check
+     * @return true if c is 0-9
+     */
     static bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
+    /**
+     * scan a name like foo_1.
+     * @return identifier token
+     */
     Token identifier() {
         const auto start = position_++;
         while (position_ < source_.size()) {
@@ -85,6 +107,11 @@ private:
         return {TokenKind::identifier, source_.substr(start, position_ - start), 0, line_};
     }
 
+    /**
+     * scan a decimal number.
+     * @return number token
+     * @throws std::runtime_error if it doesn't fit in 64 bits
+     */
     Token number() {
         const auto start = position_;
         while (position_ < source_.size() && is_digit(source_[position_])) {
@@ -99,9 +126,14 @@ private:
         return {TokenKind::number, text, value, line_};
     }
 
+    /**
+     * scan a "string", handling \n, \t, \" and \\.
+     * @return string token with escapes already applied
+     * @throws std::runtime_error on bad escapes or unterminated strings
+     */
     Token string() {
         const unsigned int start_line = line_;
-        ++position_;
+        ++position_; /* skip the opening quote */
         std::string value;
         while (position_ < source_.size() && source_[position_] != '"') {
             char c = source_[position_++];
@@ -127,10 +159,15 @@ private:
             throw std::runtime_error("line " + std::to_string(start_line) +
                                      ": unterminated string literal");
         }
-        ++position_;
+        ++position_; /* skip the closing quote */
         return {TokenKind::string, value, 0, start_line};
     }
 
+    /**
+     * scan an operator or punctuation.
+     * @return symbol token
+     * @throws std::runtime_error on unknown characters
+     */
     Token symbol() {
         const char c = source_[position_++];
         TokenKind kind;
@@ -162,6 +199,7 @@ private:
     unsigned int line_ = 1;
 };
 
+/* bytecode instructions, must match the kernel's gex.cpp. */
 enum Opcode : std::uint8_t {
     push_i32 = 0x01,
     load = 0x02,
@@ -182,10 +220,19 @@ enum Opcode : std::uint8_t {
     halt = 0xFF,
 };
 
+/* turns tokens into bytecode, one statement per line. */
 class Compiler {
 public:
+    /**
+     * @param tokens output of Lexer::scan()
+     */
     explicit Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
 
+    /**
+     * compile every statement, then fill in the jump targets.
+     * @return bytecode, always ending with halt
+     * @throws std::runtime_error on any compile error
+     */
     std::vector<std::uint8_t> compile() {
         while (!at(TokenKind::end)) {
             if (match(TokenKind::newline)) {
@@ -193,11 +240,13 @@ public:
             }
             statement();
         }
+        /* now that every label is known, patch the jumps. */
         for (const auto& fixup : fixups_) {
             const auto target = labels_.find(fixup.label);
             if (target == labels_.end()) {
                 throw std::runtime_error("undefined label '" + fixup.label + "'");
             }
+            /* offsets are relative to the end of the 4-byte operand. */
             const auto relative = static_cast<std::int64_t>(target->second) -
                                   static_cast<std::int64_t>(fixup.operand_offset + 4);
             if (relative < std::numeric_limits<std::int32_t>::min() ||
@@ -210,20 +259,36 @@ public:
         return code_;
     }
 
+    /**
+     * @return how many variables the program uses
+     */
     std::uint8_t variable_count() const {
         return static_cast<std::uint8_t>(variables_.size());
     }
 
 private:
+    /* a jump whose target label wasn't known yet. */
     struct Fixup {
         std::string label;
         std::size_t operand_offset;
     };
 
+    /**
+     * @return token we're looking at
+     */
     const Token& current() const { return tokens_[position_]; }
 
+    /**
+     * @param kind kind to check for
+     * @return true if the current token is that kind
+     */
     bool at(TokenKind kind) const { return current().kind == kind; }
 
+    /**
+     * skip the current token if it's the given kind.
+     * @param kind kind to check for
+     * @return true if it matched and was skipped
+     */
     bool match(TokenKind kind) {
         if (!at(kind)) {
             return false;
@@ -232,8 +297,17 @@ private:
         return true;
     }
 
+    /**
+     * @return token after the current one
+     */
     const Token& lookahead() const { return tokens_[position_ + 1]; }
 
+    /**
+     * take the current token, failing if it's the wrong kind.
+     * @param kind kind we expect
+     * @param message error if it's not there
+     * @return the token
+     */
     Token consume(TokenKind kind, const std::string& message) {
         if (!at(kind)) {
             fail(message);
@@ -241,15 +315,25 @@ private:
         return tokens_[position_++];
     }
 
+    /**
+     * throw a compile error with the current line number.
+     * @param message what went wrong
+     * @throws std::runtime_error always
+     */
     [[noreturn]] void fail(const std::string& message) const {
         throw std::runtime_error("line " + std::to_string(current().line) + ": " + message);
     }
 
+    /**
+     * compile one line, which is one of:
+     * label:, input x, input_line x, output expr, print "text",
+     * clear, halt, goto label, if x == "text" goto label, x = expr
+     */
     void statement() {
         if (at(TokenKind::identifier) && lookahead().kind == TokenKind::colon) {
             const auto name = current().text;
-            ++position_;
-            ++position_;
+            ++position_; /* name */
+            ++position_; /* colon */
             if (!labels_.emplace(name, code_.size()).second) {
                 fail("duplicate label '" + name + "'");
             }
@@ -310,6 +394,7 @@ private:
             emit_bytes(value.text);
             emit_jump(jump_if_match, label.text);
         } else {
+            /* anything else has to be an assignment. */
             const auto name = consume(TokenKind::identifier, "expected input, output, or an assignment");
             consume(TokenKind::equal, "expected '=' after variable name");
             expression();
@@ -322,6 +407,9 @@ private:
         }
     }
 
+    /**
+     * compile + and -, the lowest precedence.
+     */
     void expression() {
         term();
         while (at(TokenKind::plus) || at(TokenKind::minus)) {
@@ -331,6 +419,9 @@ private:
         }
     }
 
+    /**
+     * compile * and /.
+     */
     void term() {
         unary();
         while (at(TokenKind::star) || at(TokenKind::slash)) {
@@ -340,6 +431,9 @@ private:
         }
     }
 
+    /**
+     * compile a leading minus, like -x or --x.
+     */
     void unary() {
         if (match(TokenKind::minus)) {
             unary();
@@ -349,6 +443,9 @@ private:
         primary();
     }
 
+    /**
+     * compile a number, a variable or (expression).
+     */
     void primary() {
         if (at(TokenKind::number)) {
             const auto value = tokens_[position_++].number;
@@ -376,6 +473,11 @@ private:
         fail("expected a number, variable, or parenthesized expression");
     }
 
+    /**
+     * get a variable's slot, giving it a new one the first time.
+     * @param name variable name
+     * @return slot index, 0-254
+     */
     std::uint8_t variable(const std::string& name) {
         const auto found = variables_.find(name);
         if (found != variables_.end()) {
@@ -389,8 +491,15 @@ private:
         return index;
     }
 
+    /**
+     * @param byte byte to append to the bytecode
+     */
     void emit(std::uint8_t byte) { code_.push_back(byte); }
 
+    /**
+     * append a little-endian i32.
+     * @param value value to append
+     */
     void emit_i32(std::int32_t value) {
         const auto bits = static_cast<std::uint32_t>(value);
         for (unsigned int shift = 0; shift < 32; shift += 8) {
@@ -398,15 +507,28 @@ private:
         }
     }
 
+    /**
+     * append a little-endian u16.
+     * @param value value to append
+     */
     void emit_u16(std::uint16_t value) {
         emit(static_cast<std::uint8_t>(value));
         emit(static_cast<std::uint8_t>(value >> 8));
     }
 
+    /**
+     * append raw string bytes, no terminator.
+     * @param value bytes to append
+     */
     void emit_bytes(const std::string& value) {
         code_.insert(code_.end(), value.begin(), value.end());
     }
 
+    /**
+     * append a jump with a placeholder offset, patched later in compile().
+     * @param opcode jump or jump_if_match
+     * @param label where to jump
+     */
     void emit_jump(std::uint8_t opcode, const std::string& label) {
         emit(opcode);
         const auto operand_offset = code_.size();
@@ -414,6 +536,11 @@ private:
         fixups_.push_back({label, operand_offset});
     }
 
+    /**
+     * overwrite 4 bytes of already emitted code with a little-endian i32.
+     * @param offset where in the bytecode
+     * @param value value to write
+     */
     void patch_i32(std::size_t offset, std::int32_t value) {
         const auto bits = static_cast<std::uint32_t>(value);
         for (unsigned int shift = 0; shift < 32; shift += 8) {
@@ -423,22 +550,33 @@ private:
 
     std::vector<Token> tokens_;
     std::size_t position_ = 0;
-    std::map<std::string, std::uint8_t> variables_;
-    std::set<std::string> initialized_;
+    std::map<std::string, std::uint8_t> variables_;   /* name -> slot */
+    std::set<std::string> initialized_;               /* assigned before use */
     std::vector<std::uint8_t> code_;
-    std::map<std::string, std::size_t> labels_;
+    std::map<std::string, std::size_t> labels_;       /* name -> code offset */
     std::vector<Fixup> fixups_;
 };
 
+/**
+ * write a little-endian u32 to a file.
+ * @param output file to write to
+ * @param value value to write
+ */
 void write_u32(std::ofstream& output, std::uint32_t value) {
     for (unsigned int shift = 0; shift < 32; shift += 8) {
         output.put(static_cast<char>(value >> shift));
     }
 }
 
+/**
+ * swap the source file's extension for .gex.
+ * @param input_path path to the .gof file
+ * @return path for the .gex file
+ */
 std::string default_output_path(const std::string& input_path) {
     const auto dot = input_path.find_last_of('.');
     const auto slash = input_path.find_last_of('/');
+    /* only treat it as an extension if the dot is in the file name. */
     if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
         return input_path.substr(0, dot) + ".gex";
     }
@@ -446,6 +584,10 @@ std::string default_output_path(const std::string& input_path) {
 }
 }
 
+/**
+ * usage: goofc source.gof [-o program.gex]
+ * @return 0 on success, 1 on compile errors, 2 on bad arguments
+ */
 int main(int argc, char** argv) {
     if (argc != 2 && argc != 4) {
         std::cerr << "usage: goofc source.gof [-o program.gex]\n";
@@ -476,6 +618,7 @@ int main(int argc, char** argv) {
         if (!output_file) {
             throw std::runtime_error("could not create output file '" + output_path + "'");
         }
+        /* header: "GOOF", u8 version, u8 variable count, u32 code size. */
         output_file.write("GOOF", 4);
         output_file.put(1); // format version
         output_file.put(static_cast<char>(compiler.variable_count()));
