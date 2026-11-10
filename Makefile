@@ -1,5 +1,6 @@
 BUILD := build
 CC := gcc
+HOSTCXX := g++
 LD := ld
 OBJCOPY := objcopy
 MAX_KERNEL_SECTORS := 127
@@ -27,17 +28,35 @@ $(BUILD)/boot.bin: $(BUILD)/boot.elf
 	$(OBJCOPY) -O binary $< $@
 	test "$$(wc -c < $@)" -eq 512
 
-$(BUILD)/kernel.o: src/kernel/kernel.cpp | $(BUILD)
+$(BUILD)/kernel.o: src/kernel/kernel.cpp src/kernel/console.hpp src/kernel/gex.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/console.o: src/kernel/console.cpp src/kernel/console.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/keyboard.o: src/kernel/keyboard.cpp src/kernel/keyboard.hpp | $(BUILD)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/gex.o: src/kernel/gex.cpp src/kernel/gex.hpp src/kernel/console.hpp src/kernel/keyboard.hpp | $(BUILD)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+
 $(BUILD)/kernel_entry.o: src/kernel/entry.s | $(BUILD)
 	$(CC) -m32 -c $< -o $@
 
-$(BUILD)/kernel.elf: $(BUILD)/kernel_entry.o $(BUILD)/kernel.o $(BUILD)/console.o kernel.ld
-	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(BUILD)/kernel_entry.o $(BUILD)/kernel.o $(BUILD)/console.o
+$(BUILD)/goofc: tools/goofc.cpp | $(BUILD)
+	$(HOSTCXX) -std=c++17 -O2 -Wall -Wextra -o $@ $<
+
+$(BUILD)/main.gex: programs/main.gof $(BUILD)/goofc
+	$(BUILD)/goofc $< -o $@
+
+$(BUILD)/program.o: src/kernel/program.s $(BUILD)/main.gex
+	$(CC) -m32 -c $< -o $@
+
+KERNEL_OBJS := $(BUILD)/kernel_entry.o $(BUILD)/kernel.o $(BUILD)/console.o \
+	$(BUILD)/keyboard.o $(BUILD)/gex.o $(BUILD)/program.o
+
+$(BUILD)/kernel.elf: $(KERNEL_OBJS) kernel.ld
+	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(KERNEL_OBJS)
 
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf
 	$(OBJCOPY) -O binary $< $@
@@ -53,7 +72,7 @@ $(BUILD)/header.o: src/boot/header.s $(BUILD)/kernel_sectors.inc
 	$(CC) -m32 -c $< -o $@
 
 $(BUILD)/header.bin: $(BUILD)/header.o
-	$(OBJCOPY) -O binary $< $@
+	$(OBJCOPY) -O binary -j .header $< $@
 	truncate -s 512 $@
 
 $(BUILD)/goofos.img: $(BUILD)/boot.bin $(BUILD)/header.bin $(BUILD)/kernel.bin

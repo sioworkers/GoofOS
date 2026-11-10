@@ -13,8 +13,14 @@ namespace console {
     void clear();
 
     /**
+     * draw one character at the cursor and advance it.
+     * @param character char to draw, or `\n`, `\r`, `\b`
+     */
+    void put_char(char character);
+
+    /**
      * write a string at the cursor, scrolling when needed.
-     * @param text null-terminated string, handles \n, \r and \b
+     * @param text null-terminated string, handles `\n`, `\r` and `\b`
      */
     void write(const char* text);
 }

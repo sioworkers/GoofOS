@@ -46,28 +46,24 @@ namespace {
         }
         cursor -= width;
     }
+}
 
-    /**
-     * draw one character at the cursor and advance it.
-     * @param character char to draw, or \n, \r, \b
-     */
-    void put_char(char character) {
-        if (character == '\n') {
-            cursor += width - (cursor % width);
-        } else if (character == '\r') {
-            cursor -= cursor % width;
-        } else if (character == '\b') {
-            if (cursor > 0) {
-                --cursor;
-                video[cursor] = attribute | ' ';
-            }
-        } else {
-            video[cursor++] = attribute | static_cast<unsigned char>(character);
+void console::put_char(char character) {
+    if (character == '\n') {
+        cursor += width - (cursor % width);
+    } else if (character == '\r') {
+        cursor -= cursor % width;
+    } else if (character == '\b') {
+        if (cursor > 0) {
+            --cursor;
+            video[cursor] = attribute | ' ';
         }
-
-        scroll_if_needed();
-        write_cursor();
+    } else {
+        video[cursor++] = attribute | static_cast<unsigned char>(character);
     }
+
+    scroll_if_needed();
+    write_cursor();
 }
 
 void console::initialize() {

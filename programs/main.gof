@@ -1,0 +1,37 @@
+# runs at boot, a tiny command loop
+
+print "type help for commands\n"
+
+loop:
+print "> "
+input_line command
+if command == "help" goto help
+if command == "add" goto add
+if command == "cls" goto cls
+if command == "halt" goto stop
+if command == "" goto loop
+print "unknown command, try help\n"
+goto loop
+
+help:
+print "help  show this\n"
+print "add   add two numbers\n"
+print "cls   clear the screen\n"
+print "halt  stop the cpu\n"
+goto loop
+
+add:
+print "a: "
+input a
+print "b: "
+input b
+output a + b
+goto loop
+
+cls:
+clear
+goto loop
+
+stop:
+print "bye!\n"
+halt
