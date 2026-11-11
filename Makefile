@@ -1,4 +1,6 @@
 BUILD := build
+PROGRAM := programs/main.gof
+GOOFC := build/goofc
 CC := gcc
 HOSTCXX := g++
 LD := ld
@@ -11,7 +13,7 @@ CXXFLAGS := -m32 -march=i386 -mno-sse -mno-mmx -msoft-float \
 	-fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -Wall -Wextra -O2
 
-.PHONY: all run test clean
+.PHONY: all run test tests clean
 
 all: $(BUILD)/goofos.img
 
@@ -28,13 +30,16 @@ $(BUILD)/boot.bin: $(BUILD)/boot.elf
 	$(OBJCOPY) -O binary $< $@
 	test "$$(wc -c < $@)" -eq 512
 
-$(BUILD)/kernel.o: src/kernel/kernel.cpp src/kernel/console.hpp src/kernel/gex.hpp | $(BUILD)
+$(BUILD)/kernel.o: src/kernel/kernel.cpp src/kernel/console.hpp src/kernel/gex.hpp src/kernel/serial.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/console.o: src/kernel/console.cpp src/kernel/console.hpp | $(BUILD)
+$(BUILD)/console.o: src/kernel/console.cpp src/kernel/console.hpp src/kernel/ports.hpp src/kernel/serial.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/keyboard.o: src/kernel/keyboard.cpp src/kernel/keyboard.hpp | $(BUILD)
+$(BUILD)/keyboard.o: src/kernel/keyboard.cpp src/kernel/keyboard.hpp src/kernel/ports.hpp | $(BUILD)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/serial.o: src/kernel/serial.cpp src/kernel/serial.hpp src/kernel/ports.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/gex.o: src/kernel/gex.cpp src/kernel/gex.hpp src/kernel/console.hpp src/kernel/keyboard.hpp | $(BUILD)
@@ -43,17 +48,19 @@ $(BUILD)/gex.o: src/kernel/gex.cpp src/kernel/gex.hpp src/kernel/console.hpp src
 $(BUILD)/kernel_entry.o: src/kernel/entry.s | $(BUILD)
 	$(CC) -m32 -c $< -o $@
 
-$(BUILD)/goofc: tools/goofc.cpp | $(BUILD)
+$(GOOFC): tools/goofc.cpp
+	mkdir -p $(dir $@)
 	$(HOSTCXX) -std=c++17 -O2 -Wall -Wextra -o $@ $<
 
-$(BUILD)/main.gex: programs/main.gof $(BUILD)/goofc
-	$(BUILD)/goofc $< -o $@
+# PROGRAM picks which .gof gets baked into the kernel.
+$(BUILD)/main.gex: $(PROGRAM) $(GOOFC) | $(BUILD)
+	$(GOOFC) $< -o $@
 
 $(BUILD)/program.o: src/kernel/program.s $(BUILD)/main.gex
-	$(CC) -m32 -c $< -o $@
+	$(CC) -m32 -Wa,-I,$(BUILD) -c $< -o $@
 
 KERNEL_OBJS := $(BUILD)/kernel_entry.o $(BUILD)/kernel.o $(BUILD)/console.o \
-	$(BUILD)/keyboard.o $(BUILD)/gex.o $(BUILD)/program.o
+	$(BUILD)/keyboard.o $(BUILD)/serial.o $(BUILD)/gex.o $(BUILD)/program.o
 
 $(BUILD)/kernel.elf: $(KERNEL_OBJS) kernel.ld
 	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(KERNEL_OBJS)
@@ -69,7 +76,7 @@ $(BUILD)/kernel_sectors.inc: $(BUILD)/kernel.bin
 	printf '.word %s\n' "$$sectors" > $@
 
 $(BUILD)/header.o: src/boot/header.s $(BUILD)/kernel_sectors.inc
-	$(CC) -m32 -c $< -o $@
+	$(CC) -m32 -Wa,-I,$(BUILD) -c $< -o $@
 
 $(BUILD)/header.bin: $(BUILD)/header.o
 	$(OBJCOPY) -O binary -j .header $< $@
@@ -82,10 +89,13 @@ $(BUILD)/goofos.img: $(BUILD)/boot.bin $(BUILD)/header.bin $(BUILD)/kernel.bin
 	truncate -s $(IMAGE_SIZE) $@
 
 run: $(BUILD)/goofos.img
-	qemu-system-i386 -drive format=raw,file=$<
+	qemu-system-i386 -drive format=raw,file=$< -serial stdio
 
 test: $(BUILD)/goofos.img
 	python3 tools/boottest.py $<
+
+tests: $(GOOFC)
+	python3 tools/runtests.py
 
 clean:
 	rm -rf $(BUILD)

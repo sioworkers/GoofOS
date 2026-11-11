@@ -1,0 +1,4 @@
+output "before"               #> before
+zero = 0
+output 1 / zero               #> gex error: division by zero
+output "never printed"

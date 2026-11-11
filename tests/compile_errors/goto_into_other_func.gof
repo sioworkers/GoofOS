@@ -1,0 +1,7 @@
+# labels inside a func can only be reached from that func
+func f()
+    goto inside               #! line 3: undefined label 'inside'
+end
+func g()
+    inside:
+end

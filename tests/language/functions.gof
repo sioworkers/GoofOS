@@ -1,0 +1,61 @@
+# params, return values, locals, recursion and per-func labels
+
+# funcs can be called before they're defined
+output twice(21)              #> 42
+
+func twice(n)
+    return n * 2
+end
+
+# no return gives 0
+func nothing()
+end
+output nothing()              #> 0
+
+func fib(n)
+    if n < 2 goto base
+    return fib(n - 1) + fib(n - 2)
+    base:
+    return n
+end
+output fib(15)                #> 610
+
+# params and assigned names are local, globals stay untouched
+x = "global"
+func shadow(x)
+    x = x + "!"
+    return x
+end
+output shadow("local")        #> local!
+output x                      #> global
+
+func read_global()
+    return x
+end
+output read_global()          #> global
+
+# a call on its own line throws the result away
+func count_down(n)
+    loop:
+    if n == 0 goto done
+    print n + " "
+    n = n - 1
+    goto loop
+    done:
+    output "go"
+end
+count_down(3)                 #> 3 2 1 go
+
+# same label names as count_down, but labels belong to their func
+func other()
+    loop:
+    done:
+    return "labels are per func"
+end
+output other()                #> labels are per func
+
+func add3(a, b, c)
+    return a + b + c
+end
+output add3(1, 2, 3)          #> 6
+output add3("a", 1, 2)        #> a12

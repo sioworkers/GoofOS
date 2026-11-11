@@ -1,0 +1,17 @@
+# comparisons give 1 or 0, text compares alphabetically
+
+output 1 < 2                  #> 1
+output 2 < 1                  #> 0
+output 2 <= 2                 #> 1
+output 3 >= 4                 #> 0
+output 5 == 5                 #> 1
+output 5 != 5                 #> 0
+output 1 + 1 == 2             #> 1
+output "abc" == "abc"         #> 1
+output "abc" < "abd"          #> 1
+output "b" > "abc"            #> 1
+output "ab" < "abc"           #> 1
+
+# a number never equals text, even if it looks the same
+output 1 == "1"               #> 0
+output 1 != "1"               #> 1

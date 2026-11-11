@@ -1,0 +1,16 @@
+# text values, joining with + and escapes
+
+output "hello"                #> hello
+output "a" + "b"              #> ab
+output "n=" + 5               #> n=5
+output 5 + "!"                #> 5!
+output 1 + 2 + "x"            #> 3x
+output "x" + 1 + 2            #> x12
+output "say \"hi\""           #> say "hi"
+output "back\\slash"          #> back\slash
+output "two\nlines"           #> two
+                              #> lines
+output ""                     #>
+print "no "
+print "newline"
+output ""                     #> no newline

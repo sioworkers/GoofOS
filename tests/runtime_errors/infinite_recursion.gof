@@ -1,0 +1,5 @@
+# gex only allows 64 nested calls
+func forever(n)
+    return forever(n + 1)
+end
+output forever(0)             #> gex error: too many nested calls

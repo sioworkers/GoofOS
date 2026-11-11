@@ -1,2 +1,2 @@
 .section .header, "a"
-.include "build/kernel_sectors.inc"
+.include "kernel_sectors.inc"

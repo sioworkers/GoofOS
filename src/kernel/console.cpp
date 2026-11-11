@@ -1,4 +1,6 @@
 #include "console.hpp"
+#include "ports.hpp"
+#include "serial.hpp"
 
 namespace {
     constexpr unsigned int width = 80;
@@ -9,24 +11,15 @@ namespace {
     unsigned int cursor = width; /* row 0 keeps the bootloader's message */
 
     /**
-     * write one byte to an i/o port.
-     * @param port port number
-     * @param value byte to send
-     */
-    void write_port(unsigned short port, unsigned char value) {
-        asm volatile("outb %0, %1" : : "a"(value), "Nd"(port));
-    }
-
-    /**
      * move the hardware cursor to where our cursor is.
      */
     void write_cursor() {
         const unsigned short position = static_cast<unsigned short>(cursor);
         /* crtc registers 0x0F/0x0E hold the low/high cursor byte. */
-        write_port(0x3D4, 0x0F);
-        write_port(0x3D5, position & 0xFF);
-        write_port(0x3D4, 0x0E);
-        write_port(0x3D5, position >> 8);
+        ports::write(0x3D4, 0x0F);
+        ports::write(0x3D5, position & 0xFF);
+        ports::write(0x3D4, 0x0E);
+        ports::write(0x3D5, position >> 8);
     }
 
     /**
@@ -49,6 +42,9 @@ namespace {
 }
 
 void console::put_char(char character) {
+    /* everything on screen also goes to the serial log. */
+    serial::write_char(character);
+
     if (character == '\n') {
         cursor += width - (cursor % width);
     } else if (character == '\r') {

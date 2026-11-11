@@ -1,0 +1,4 @@
+func outer()
+    func inner()              #! line 2: a func can't be inside another func
+    end
+end

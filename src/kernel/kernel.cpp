@@ -1,5 +1,6 @@
 #include "console.hpp"
 #include "gex.hpp"
+#include "serial.hpp"
 
 #include <cstddef>
 
@@ -11,6 +12,7 @@ extern "C" const unsigned char program_end[];
  * kernel entry point, called from entry.s once the stack is set up.
  */
 extern "C" void kernel_main() {
+    serial::initialize();
     console::initialize();
     console::write("Hello from Kernel!\n");
 

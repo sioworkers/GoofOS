@@ -21,6 +21,9 @@ jobs:
       - name: boot test
         run: make test
 
+      - name: goof tests
+        run: make tests
+
       - name: upload image
         uses: actions/upload-artifact@v7
         with:

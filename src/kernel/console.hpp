@@ -13,7 +13,8 @@ namespace console {
     void clear();
 
     /**
-     * draw one character at the cursor and advance it.
+     * draw one character at the cursor and advance it, also sends it
+     * to the serial port.
      * @param character char to draw, or `\n`, `\r`, `\b`
      */
     void put_char(char character);

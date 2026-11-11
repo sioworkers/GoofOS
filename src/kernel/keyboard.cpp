@@ -1,4 +1,5 @@
 #include "keyboard.hpp"
+#include "ports.hpp"
 
 namespace {
     constexpr unsigned short data_port = 0x60;
@@ -30,28 +31,17 @@ namespace {
     bool after_extended = false;
 
     /**
-     * read one byte from an i/o port.
-     * @param port port number
-     * @return the byte
-     */
-    unsigned char read_port(unsigned short port) {
-        unsigned char value;
-        asm volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
-        return value;
-    }
-
-    /**
      * wait until the controller has a keyboard byte for us.
      * @return raw scancode
      */
     unsigned char read_scancode() {
         for (;;) {
-            const unsigned char status = read_port(status_port);
+            const unsigned char status = ports::read(status_port);
             /* bit 0: data waiting, bit 5: it's from the mouse, not us. */
             if ((status & 0x01) == 0) {
                 continue;
             }
-            const unsigned char code = read_port(data_port);
+            const unsigned char code = ports::read(data_port);
             if ((status & 0x20) == 0) {
                 return code;
             }

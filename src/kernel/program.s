@@ -4,5 +4,5 @@
 .global program_end
 
 program_start:
-    .incbin "build/main.gex"
+    .incbin "main.gex"
 program_end:

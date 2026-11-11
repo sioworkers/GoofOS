@@ -1,0 +1,1 @@
+x = g(1)                      #! line 1: undefined func 'g'

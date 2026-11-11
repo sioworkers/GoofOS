@@ -1,0 +1,24 @@
+# goto loops and what counts as true
+
+i = 1
+loop:
+output i                      #> 1
+                              #> 2
+                              #> 3
+i = i + 1
+if i <= 3 goto loop
+
+# 0 and "" are false, everything else is true
+if 0 goto bad
+if "" goto bad
+if 7 goto number_ok
+goto bad
+number_ok:
+if "x" goto text_ok
+goto bad
+text_ok:
+output "truthiness ok"        #> truthiness ok
+halt
+
+bad:
+output "bad"

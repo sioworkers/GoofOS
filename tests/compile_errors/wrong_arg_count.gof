@@ -1,0 +1,4 @@
+func f(a)
+    return a
+end
+x = f(1, 2)                   #! line 4: func 'f' takes 1 argument(s), got 2

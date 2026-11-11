@@ -1,0 +1,19 @@
+# precedence, negatives and the edges of 32-bit math
+
+output 1 + 2 * 3              #> 7
+output (1 + 2) * 3            #> 9
+output 10 - 4 - 3             #> 3
+output 2 * -3                 #> -6
+output --5                    #> 5
+output 7 / 2                  #> 3
+output -7 / 2                 #> -3
+output -7 % 2                 #> -1
+output 7 % -2                 #> 1
+output 100 / 7 * 7 + 100 % 7  #> 100
+
+# overflow wraps around instead of crashing
+output 2147483647 + 1         #> -2147483648
+output 65536 * 65536          #> 0
+min = -2147483647 - 1
+output min / -1               #> -2147483648
+output min % -1               #> 0
