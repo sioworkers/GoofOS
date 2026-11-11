@@ -7,38 +7,68 @@
 namespace {
 /* bytecode instructions, must match goofc. */
 enum Opcode : std::uint8_t {
-    push_i32 = 0x01,      /* i32 value: push it */
-    load = 0x02,          /* u8 var: push its value */
-    store = 0x03,         /* u8 var: pop into it */
-    input = 0x04,         /* u8 var: read an integer into it */
-    add = 0x10,
+    push_int = 0x01,      /* i32 value */
+    load_global = 0x02,   /* u8 slot */
+    store_global = 0x03,  /* u8 slot */
+    input_int = 0x04,     /* push a number typed by the user */
+    push_text = 0x05,     /* u16 length + bytes */
+    load_local = 0x06,    /* u8 slot in the current frame */
+    store_local = 0x07,   /* u8 slot in the current frame */
+    input_text = 0x08,    /* push a line typed by the user */
+    add = 0x10,           /* numbers add, anything + text joins */
     subtract = 0x11,
     multiply = 0x12,
     divide = 0x13,
     negate = 0x14,
-    output = 0x20,        /* pop and print as an integer */
-    print_text = 0x30,    /* u16 length + bytes: print them */
-    input_line = 0x31,    /* u8 var: read a line into it */
-    match_text = 0x32,    /* u8 var + u16 length + bytes: set condition if equal */
-    jump_if_match = 0x33, /* i32 offset: jump if condition is set */
-    jump = 0x34,          /* i32 offset: always jump */
+    modulo = 0x15,
+    equal = 0x18,
+    not_equal = 0x19,
+    less = 0x1A,
+    less_equal = 0x1B,
+    greater = 0x1C,
+    greater_equal = 0x1D,
+    print = 0x20,         /* pop and print */
+    print_line = 0x21,    /* pop and print with a newline */
+    jump_if = 0x33,       /* i32 offset: pop, jump if truthy */
+    jump = 0x34,          /* i32 offset */
     clear_screen = 0x35,
+    call = 0x40,          /* i32 offset + u8 arg count */
+    ret = 0x41,           /* pop the result, drop the frame, push the result */
+    pop = 0x42,           /* drop the top value */
+    reserve = 0x43,       /* u8 count: make room for a function's locals */
     halt = 0xFF,
 };
 
-constexpr unsigned int max_variables = 255;
-constexpr unsigned int max_stack = 256;
-constexpr unsigned int max_line = 128;
+constexpr unsigned int max_globals = 255;
+constexpr unsigned int max_stack = 512;
+constexpr unsigned int max_frames = 64;
+constexpr unsigned int max_text = 128; /* including the null */
 
-/* every variable has both an integer and a string slot. */
-std::int32_t values[max_variables];
-char strings[max_variables][max_line];
-std::int32_t stack[max_stack];
+/* a value is either a number or a piece of text. */
+enum class Kind : std::uint8_t { number, text };
+
+struct Value {
+    Kind kind;
+    std::int32_t number;
+    char text[max_text];
+};
+
+/* where to go back to after a call, and the caller's locals. */
+struct Frame {
+    std::size_t return_pc;
+    unsigned int base;
+};
+
+Value globals[max_globals];
+Value stack[max_stack];
+Frame frames[max_frames];
+unsigned int sp = 0;          /* next free stack slot */
+unsigned int base = 0;        /* first local of the current function */
+unsigned int frame_count = 0;
 
 /**
  * print an error and stop the cpu.
  * @param message what went wrong
- * @return never
  */
 [[noreturn]] void panic(const char* message) {
     console::write("gex error: ");
@@ -95,56 +125,161 @@ unsigned char read_byte(const unsigned char* code, std::size_t length, std::size
 }
 
 /**
- * pop a value off the stack.
- * @param sp stack pointer
- * @return the popped value
+ * make a value a number.
+ * @param value value to overwrite
+ * @param number the number
  */
-std::int32_t pop(unsigned int& sp) {
+void set_number(Value& value, std::int32_t number) {
+    value.kind = Kind::number;
+    value.number = number;
+    value.text[0] = '\0';
+}
+
+/**
+ * make a value a piece of text, cut off if it's too long.
+ * @param value value to overwrite
+ * @param text bytes to copy, don't need a null
+ * @param length how many bytes
+ */
+void set_text(Value& value, const char* text, std::size_t length) {
+    if (length > max_text - 1) length = max_text - 1;
+    value.kind = Kind::text;
+    value.number = 0;
+    for (std::size_t i = 0; i < length; ++i) value.text[i] = text[i];
+    value.text[length] = '\0';
+}
+
+/**
+ * copy one value into another, only copying the used part of the text.
+ * @param to destination
+ * @param from source
+ */
+void copy_value(Value& to, const Value& from) {
+    to.kind = from.kind;
+    to.number = from.number;
+    unsigned int i = 0;
+    while (from.text[i] != '\0') {
+        to.text[i] = from.text[i];
+        ++i;
+    }
+    to.text[i] = '\0';
+}
+
+/**
+ * @param value value to check
+ * @return true for non-zero numbers and non-empty text
+ */
+bool is_truthy(const Value& value) {
+    return value.kind == Kind::number ? value.number != 0 : value.text[0] != '\0';
+}
+
+/**
+ * write a number as decimal text.
+ * @param number number to write
+ * @param out buffer with room for at least 12 chars
+ * @return how many chars were written, no null added
+ */
+unsigned int format_number(std::int32_t number, char* out) {
+    char digits[12];
+    unsigned int count = 0;
+    unsigned int length = 0;
+    /* go unsigned so INT32_MIN doesn't overflow. */
+    std::uint32_t magnitude = static_cast<std::uint32_t>(number);
+    if (number < 0) {
+        out[length++] = '-';
+        magnitude = 0u - magnitude;
+    }
+    /* digits come out backwards, so flip them. */
+    do {
+        digits[count++] = static_cast<char>('0' + magnitude % 10);
+        magnitude /= 10;
+    } while (magnitude != 0);
+    while (count != 0) out[length++] = digits[--count];
+    return length;
+}
+
+/**
+ * turn any value into text.
+ * @param value value to convert
+ * @param out buffer with room for max_text chars
+ * @return text length, no null added
+ */
+unsigned int to_text(const Value& value, char* out) {
+    if (value.kind == Kind::number) return format_number(value.number, out);
+    unsigned int length = 0;
+    while (value.text[length] != '\0') {
+        out[length] = value.text[length];
+        ++length;
+    }
+    return length;
+}
+
+/**
+ * @return a fresh slot on top of the stack
+ */
+Value& push_slot() {
+    if (sp >= max_stack) panic("stack overflow");
+    return stack[sp++];
+}
+
+/**
+ * @return the top value, now off the stack (valid until the next push)
+ */
+Value& pop_value() {
     if (sp == 0) panic("stack underflow");
     return stack[--sp];
 }
 
 /**
- * push a value onto the stack.
- * @param sp stack pointer
- * @param value value to push
+ * @param value value that has to be a number
+ * @return its number
  */
-void push(unsigned int& sp, std::int32_t value) {
-    if (sp >= max_stack) panic("stack overflow");
-    stack[sp++] = value;
+std::int32_t expect_number(const Value& value) {
+    if (value.kind != Kind::number) panic("expected a number, got text");
+    return value.number;
 }
 
 /**
- * print a signed integer in decimal.
- * @param value number to print
+ * compare two values: numbers by size, text alphabetically.
+ * @param left left side
+ * @param right right side
+ * @return negative, zero or positive like strcmp
  */
-void print_integer(std::int32_t value) {
-    char digits[12];
-    unsigned int length = 0;
-    std::uint32_t magnitude;
-    /* go unsigned so INT32_MIN doesn't overflow. */
-    if (value < 0) {
-        console::put_char('-');
-        magnitude = 0u - static_cast<std::uint32_t>(value);
-    } else {
-        magnitude = static_cast<std::uint32_t>(value);
+int compare(const Value& left, const Value& right) {
+    if (left.kind != right.kind) panic("can't compare text with a number");
+    if (left.kind == Kind::number) {
+        return left.number < right.number ? -1 : (left.number > right.number ? 1 : 0);
     }
-    /* digits come out backwards, so print them in reverse. */
-    do {
-        digits[length++] = static_cast<char>('0' + magnitude % 10);
-        magnitude /= 10;
-    } while (magnitude != 0);
-    while (length != 0) {
-        console::put_char(digits[--length]);
-    }
+    unsigned int i = 0;
+    while (left.text[i] != '\0' && left.text[i] == right.text[i]) ++i;
+    return static_cast<unsigned char>(left.text[i]) - static_cast<unsigned char>(right.text[i]);
 }
 
 /**
- * read a line from the keyboard and parse it as an integer.
- * @param variable variable to store it in
+ * @param left left side
+ * @param right right side
+ * @return true if both have the same kind and the same contents
  */
-void read_integer(std::uint8_t variable) {
-    char line[max_line];
+bool same(const Value& left, const Value& right) {
+    return left.kind == right.kind && compare(left, right) == 0;
+}
+
+/**
+ * print a value, no newline.
+ * @param value value to print
+ */
+void print_value(const Value& value) {
+    char text[max_text];
+    const unsigned int length = to_text(value, text);
+    for (unsigned int i = 0; i < length; ++i) console::put_char(text[i]);
+}
+
+/**
+ * read a line from the keyboard with backspace support.
+ * @param line buffer with room for max_text chars, gets a null at the end
+ * @return line length
+ */
+unsigned int read_line(char* line) {
     unsigned int length = 0;
     for (;;) {
         const char c = keyboard::read_char();
@@ -157,12 +292,22 @@ void read_integer(std::uint8_t variable) {
                 --length;
                 console::put_char('\b');
             }
-        } else if (c >= ' ' && length < max_line - 1) {
+        } else if (c >= ' ' && length < max_text - 1) {
             line[length++] = c;
             console::put_char(c);
         }
     }
     line[length] = '\0';
+    return length;
+}
+
+/**
+ * read a line from the keyboard and parse it as an integer.
+ * @return the number
+ */
+std::int32_t read_integer() {
+    char line[max_text];
+    read_line(line);
     unsigned int index = 0;
     bool negative = false;
     if (line[index] == '-') {
@@ -175,38 +320,12 @@ void read_integer(std::uint8_t variable) {
         value = value * 10 + static_cast<unsigned int>(line[index++] - '0');
     }
     if (line[index] != '\0') panic("invalid integer input");
-    values[variable] = negative ? static_cast<std::int32_t>(0u - value)
-                                : static_cast<std::int32_t>(value);
-}
-
-/**
- * read a line from the keyboard into a string variable.
- * @param variable variable to store it in
- */
-void read_line(std::uint8_t variable) {
-    unsigned int length = 0;
-    for (;;) {
-        const char c = keyboard::read_char();
-        if (c == '\n') {
-            console::put_char('\n');
-            break;
-        }
-        if (c == '\b') {
-            if (length != 0) {
-                --length;
-                console::put_char('\b');
-            }
-        } else if (c >= ' ' && length < max_line - 1) {
-            strings[variable][length++] = c;
-            console::put_char(c);
-        }
-    }
-    strings[variable][length] = '\0';
+    return negative ? static_cast<std::int32_t>(0u - value) : static_cast<std::int32_t>(value);
 }
 
 /**
  * move pc by an offset, refusing to leave the bytecode.
- * @param pc position right after the jump instruction
+ * @param pc position right after the offset
  * @param code_size bytecode size
  * @param offset how far to jump, can be negative
  */
@@ -217,128 +336,202 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
     }
     pc = static_cast<std::size_t>(target);
 }
+
+/**
+ * find a local in the current frame.
+ * @param index local number
+ * @return the stack slot holding it
+ */
+Value& local(unsigned int index) {
+    if (frame_count == 0 || base + index >= sp) panic("invalid local index");
+    return stack[base + index];
+}
 }
 
 [[noreturn]] void gex::run(const unsigned char* file, std::size_t size) {
-    /* header: "GOOF", u8 version, u8 variable count, u32 code size. */
+    /* header: "GOOF", u8 version, u8 global count, u32 code size. */
     if (size < 10 || file[0] != 'G' || file[1] != 'O' || file[2] != 'O' || file[3] != 'F') {
         panic("invalid executable header");
     }
-    if (file[4] != 1) panic("unsupported executable version");
-    const unsigned int variable_count = file[5];
+    if (file[4] != 2) panic("unsupported executable version");
+    const unsigned int global_count = file[5];
     const std::size_t code_size = static_cast<std::uint32_t>(file[6]) |
                                   (static_cast<std::uint32_t>(file[7]) << 8) |
                                   (static_cast<std::uint32_t>(file[8]) << 16) |
                                   (static_cast<std::uint32_t>(file[9]) << 24);
     if (code_size > size - 10) panic("truncated executable");
 
-    /* start every program with clean variables. */
-    for (unsigned int i = 0; i < max_variables; ++i) {
-        values[i] = 0;
-        strings[i][0] = '\0';
-    }
+    /* start every program with clean globals and an empty stack. */
+    for (unsigned int i = 0; i < max_globals; ++i) set_number(globals[i], 0);
+    sp = 0;
+    base = 0;
+    frame_count = 0;
     const auto* code = file + 10;
     std::size_t pc = 0;
-    unsigned int sp = 0;
-    bool condition = false; /* set by match_text, used by jump_if_match */
 
     for (;;) {
         const auto opcode = read_byte(code, code_size, pc);
         switch (opcode) {
-        case push_i32:
-            push(sp, static_cast<std::int32_t>(read_u32(code, code_size, pc)));
+        case push_int:
+            set_number(push_slot(), static_cast<std::int32_t>(read_u32(code, code_size, pc)));
             break;
-        case load: {
-            const auto variable = read_byte(code, code_size, pc);
-            if (variable >= variable_count) panic("invalid variable index");
-            push(sp, values[variable]);
-            break;
-        }
-        case store: {
-            const auto variable = read_byte(code, code_size, pc);
-            if (variable >= variable_count) panic("invalid variable index");
-            values[variable] = pop(sp);
-            break;
-        }
-        case input: {
-            const auto variable = read_byte(code, code_size, pc);
-            if (variable >= variable_count) panic("invalid variable index");
-            read_integer(variable);
-            break;
-        }
-        /* math is done unsigned so overflow wraps instead of being ub. */
-        case add: {
-            const auto right = static_cast<std::uint32_t>(pop(sp));
-            const auto left = static_cast<std::uint32_t>(pop(sp));
-            push(sp, static_cast<std::int32_t>(left + right));
-            break;
-        }
-        case subtract: {
-            const auto right = static_cast<std::uint32_t>(pop(sp));
-            const auto left = static_cast<std::uint32_t>(pop(sp));
-            push(sp, static_cast<std::int32_t>(left - right));
-            break;
-        }
-        case multiply: {
-            const auto right = static_cast<std::uint32_t>(pop(sp));
-            const auto left = static_cast<std::uint32_t>(pop(sp));
-            push(sp, static_cast<std::int32_t>(left * right));
-            break;
-        }
-        case divide: {
-            const auto right = pop(sp);
-            const auto left = pop(sp);
-            if (right == 0) panic("division by zero");
-            /* INT32_MIN / -1 would trap, so just wrap it. */
-            if (left == INT32_MIN && right == -1) push(sp, INT32_MIN);
-            else push(sp, left / right);
-            break;
-        }
-        case negate: {
-            const auto value = static_cast<std::uint32_t>(pop(sp));
-            push(sp, static_cast<std::int32_t>(0u - value));
-            break;
-        }
-        case output:
-            print_integer(pop(sp));
-            console::put_char('\n');
-            break;
-        case print_text: {
+        case push_text: {
             const auto length = read_u16(code, code_size, pc);
             if (pc + length > code_size) panic("truncated string");
-            for (unsigned int i = 0; i < length; ++i) console::put_char(code[pc++]);
-            break;
-        }
-        case input_line: {
-            const auto variable = read_byte(code, code_size, pc);
-            if (variable >= variable_count) panic("invalid variable index");
-            read_line(variable);
-            break;
-        }
-        case match_text: {
-            const auto variable = read_byte(code, code_size, pc);
-            const auto length = read_u16(code, code_size, pc);
-            if (variable >= variable_count || pc + length > code_size) {
-                panic("invalid string comparison");
-            }
-            unsigned int i = 0;
-            while (i < length && strings[variable][i] != '\0' &&
-                   strings[variable][i] == static_cast<char>(code[pc + i])) {
-                ++i;
-            }
-            /* equal only if both ended at the same spot. */
-            condition = i == length && strings[variable][i] == '\0';
+            set_text(push_slot(), reinterpret_cast<const char*>(code + pc), length);
             pc += length;
             break;
         }
-        case jump_if_match: {
+        case load_global: {
+            const auto slot = read_byte(code, code_size, pc);
+            if (slot >= global_count) panic("invalid global index");
+            copy_value(push_slot(), globals[slot]);
+            break;
+        }
+        case store_global: {
+            const auto slot = read_byte(code, code_size, pc);
+            if (slot >= global_count) panic("invalid global index");
+            copy_value(globals[slot], pop_value());
+            break;
+        }
+        case load_local: {
+            const auto index = read_byte(code, code_size, pc);
+            const Value& value = local(index);
+            copy_value(push_slot(), value);
+            break;
+        }
+        case store_local: {
+            const auto index = read_byte(code, code_size, pc);
+            const Value& value = pop_value();
+            copy_value(local(index), value);
+            break;
+        }
+        case input_int:
+            set_number(push_slot(), read_integer());
+            break;
+        case input_text: {
+            char line[max_text];
+            const auto length = read_line(line);
+            set_text(push_slot(), line, length);
+            break;
+        }
+        /* binary ops work in place: the result replaces the left value. */
+        case add: {
+            const Value& right = pop_value();
+            if (sp == 0) panic("stack underflow");
+            Value& left = stack[sp - 1];
+            if (left.kind == Kind::number && right.kind == Kind::number) {
+                /* math is done unsigned so overflow wraps instead of being ub. */
+                left.number = static_cast<std::int32_t>(static_cast<std::uint32_t>(left.number) +
+                                                        static_cast<std::uint32_t>(right.number));
+            } else {
+                /* anything + text joins them as text. */
+                char joined[max_text * 2];
+                unsigned int length = to_text(left, joined);
+                length += to_text(right, joined + length);
+                set_text(left, joined, length);
+            }
+            break;
+        }
+        case subtract:
+        case multiply:
+        case divide:
+        case modulo: {
+            const auto right = expect_number(pop_value());
+            if (sp == 0) panic("stack underflow");
+            Value& left = stack[sp - 1];
+            const auto l = static_cast<std::uint32_t>(expect_number(left));
+            const auto r = static_cast<std::uint32_t>(right);
+            if (opcode == subtract) {
+                left.number = static_cast<std::int32_t>(l - r);
+            } else if (opcode == multiply) {
+                left.number = static_cast<std::int32_t>(l * r);
+            } else {
+                if (right == 0) panic("division by zero");
+                /* INT32_MIN / -1 would trap, so just wrap it. */
+                if (left.number == INT32_MIN && right == -1) {
+                    left.number = opcode == divide ? INT32_MIN : 0;
+                } else {
+                    left.number = opcode == divide ? left.number / right : left.number % right;
+                }
+            }
+            break;
+        }
+        case negate: {
+            if (sp == 0) panic("stack underflow");
+            Value& value = stack[sp - 1];
+            value.number = static_cast<std::int32_t>(0u - static_cast<std::uint32_t>(expect_number(value)));
+            break;
+        }
+        case equal:
+        case not_equal:
+        case less:
+        case less_equal:
+        case greater:
+        case greater_equal: {
+            const Value& right = pop_value();
+            if (sp == 0) panic("stack underflow");
+            Value& left = stack[sp - 1];
+            bool result;
+            if (opcode == equal) result = same(left, right);
+            else if (opcode == not_equal) result = !same(left, right);
+            else {
+                const int order = compare(left, right);
+                if (opcode == less) result = order < 0;
+                else if (opcode == less_equal) result = order <= 0;
+                else if (opcode == greater) result = order > 0;
+                else result = order >= 0;
+            }
+            set_number(left, result ? 1 : 0);
+            break;
+        }
+        case print:
+            print_value(pop_value());
+            break;
+        case print_line:
+            print_value(pop_value());
+            console::put_char('\n');
+            break;
+        case jump_if: {
             const auto offset = static_cast<std::int32_t>(read_u32(code, code_size, pc));
-            if (condition) relative_jump(pc, code_size, offset);
+            if (is_truthy(pop_value())) relative_jump(pc, code_size, offset);
             break;
         }
         case jump: {
             const auto offset = static_cast<std::int32_t>(read_u32(code, code_size, pc));
             relative_jump(pc, code_size, offset);
+            break;
+        }
+        case call: {
+            const auto offset = static_cast<std::int32_t>(read_u32(code, code_size, pc));
+            std::size_t target = pc; /* offsets count from right after the i32 */
+            const auto arg_count = read_byte(code, code_size, pc);
+            if (arg_count > sp) panic("not enough arguments on the stack");
+            if (frame_count >= max_frames) panic("too many nested calls");
+            frames[frame_count++] = {pc, base};
+            /* the arguments already on the stack become the first locals. */
+            base = sp - arg_count;
+            relative_jump(target, code_size, offset);
+            pc = target;
+            break;
+        }
+        case ret: {
+            if (frame_count == 0) panic("return outside a function");
+            if (sp <= base) panic("stack underflow");
+            /* drop the frame but keep the result where the arguments started. */
+            copy_value(stack[base], stack[sp - 1]);
+            sp = base + 1;
+            --frame_count;
+            pc = frames[frame_count].return_pc;
+            base = frames[frame_count].base;
+            break;
+        }
+        case pop:
+            pop_value();
+            break;
+        case reserve: {
+            const auto count = read_byte(code, code_size, pc);
+            for (unsigned int i = 0; i < count; ++i) set_number(push_slot(), 0);
             break;
         }
         case clear_screen:

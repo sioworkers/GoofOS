@@ -1,31 +1,69 @@
 # runs at boot, a tiny command loop
 
-print "type help for commands\n"
+func show_help()
+    output "help   show this"
+    output "add    add two numbers"
+    output "greet  say hi"
+    output "fact   factorial, with recursion"
+    output "cls    clear the screen"
+    output "halt   stop the cpu"
+end
+
+func ask_number(prompt)
+    print prompt
+    input value
+    return value
+end
+
+func greet(name)
+    if name == "" goto nobody
+    output "hi " + name + "!"
+    return
+    nobody:
+    output "hi, whoever you are"
+end
+
+func factorial(n)
+    if n > 1 goto more
+    return 1
+    more:
+    return n * factorial(n - 1)
+end
+
+output "type help for commands"
 
 loop:
 print "> "
 input_line command
+if command == "" goto loop
 if command == "help" goto help
 if command == "add" goto add
+if command == "greet" goto greet
+if command == "fact" goto fact
 if command == "cls" goto cls
 if command == "halt" goto stop
-if command == "" goto loop
-print "unknown command, try help\n"
+output "unknown command '" + command + "', try help"
 goto loop
 
 help:
-print "help  show this\n"
-print "add   add two numbers\n"
-print "cls   clear the screen\n"
-print "halt  stop the cpu\n"
+show_help()
 goto loop
 
 add:
-print "a: "
-input a
-print "b: "
-input b
-output a + b
+a = ask_number("a: ")
+b = ask_number("b: ")
+output a + " + " + b + " = " + (a + b)
+goto loop
+
+greet:
+print "name: "
+input_line name
+greet(name)
+goto loop
+
+fact:
+n = ask_number("n: ")
+output n + "! = " + factorial(n)
 goto loop
 
 cls:
@@ -33,5 +71,5 @@ clear
 goto loop
 
 stop:
-print "bye!\n"
+output "bye!"
 halt
