@@ -1,0 +1,28 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-multilib qemu-system-x86
+
+      - name: build
+        run: make
+
+      - name: boot test
+        run: make test
+
+      - name: upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: goofos.img
+          path: build/goofos.img
