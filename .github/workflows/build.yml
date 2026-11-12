@@ -10,21 +10,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: install tools
+      - name: Install Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-multilib qemu-system-x86
 
-      - name: build
+      - name: Build
         run: make
 
-      - name: boot test
+      - name: Test
         run: make test
 
-      - name: goof tests
-        run: make tests
-
-      - name: upload image
+      - name: Upload Image
         uses: actions/upload-artifact@v7
         with:
           name: goofos.img

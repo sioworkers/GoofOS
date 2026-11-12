@@ -13,7 +13,7 @@ CXXFLAGS := -m32 -march=i386 -mno-sse -mno-mmx -msoft-float \
 	-fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -Wall -Wextra -O2
 
-.PHONY: all run test tests clean
+.PHONY: all run test clean
 
 all: $(BUILD)/goofos.img
 
@@ -91,11 +91,8 @@ $(BUILD)/goofos.img: $(BUILD)/boot.bin $(BUILD)/header.bin $(BUILD)/kernel.bin
 run: $(BUILD)/goofos.img
 	qemu-system-i386 -drive format=raw,file=$< -serial stdio
 
-test: $(BUILD)/goofos.img
-	python3 tools/boottest.py $<
-
-tests: $(GOOFC)
-	python3 tools/runtests.py
+test: $(BUILD)/goofos.img $(GOOFC)
+	python3 tools/test.py
 
 clean:
 	rm -rf $(BUILD)
