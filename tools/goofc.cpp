@@ -257,7 +257,25 @@ enum Opcode : std::uint8_t {
     ret = 0x41,
     pop = 0x42,
     reserve = 0x43,
+    file_write = 0x50,
+    file_append = 0x51,
+    file_print = 0x52,
+    file_list = 0x53,
     halt = 0xFF,
+};
+
+/* funcs built into gex. they're called like normal funcs but compile to
+   one instruction. */
+struct Builtin {
+    Opcode opcode;
+    std::size_t arity;
+};
+
+const std::map<std::string, Builtin> builtins = {
+    {"file_write", {file_write, 2}},   /* file_write(name, text) -> 1 or 0 */
+    {"file_append", {file_append, 2}}, /* file_append(name, text) -> 1 or 0 */
+    {"file_print", {file_print, 1}},   /* file_print(name) -> 1 or 0 */
+    {"file_list", {file_list, 0}},     /* file_list() -> number of files */
 };
 
 /* words that can't be used as names. */
@@ -529,6 +547,9 @@ private:
         ++position_;
         Scope scope;
         scope.name = consume_name("a func name");
+        if (builtins.count(scope.name) != 0) {
+            fail("'" + scope.name + "' is a built-in func, pick another name");
+        }
         if (functions_.count(scope.name) != 0) {
             fail("duplicate func '" + scope.name + "'");
         }
@@ -748,8 +769,8 @@ private:
     }
 
     /**
-     * compile `name(args)`: push the args, then call. leaves the
-     * result on the stack.
+     * compile `name(args)`: push the args, then call (or run the
+     * built-in). leaves the result on the stack.
      */
     void call_expression() {
         const auto line = current().line;
@@ -765,6 +786,15 @@ private:
         consume(TokenKind::right_paren, "expected ')' after the arguments");
         if (arg_count > 255) {
             fail("a call can pass at most 255 arguments");
+        }
+        const auto builtin = builtins.find(name);
+        if (builtin != builtins.end()) {
+            if (arg_count != builtin->second.arity) {
+                fail_at(line, "func '" + name + "' takes " + std::to_string(builtin->second.arity) +
+                                  " argument(s), got " + std::to_string(arg_count));
+            }
+            emit(builtin->second.opcode);
+            return;
         }
         emit(call);
         call_fixups_.push_back({name, code_.size(), arg_count, line});

@@ -1,5 +1,6 @@
 #include "console.hpp"
 #include "gex.hpp"
+#include "gofs.hpp"
 #include "keyboard.hpp"
 
 #include <cstdint>
@@ -36,6 +37,10 @@ enum Opcode : std::uint8_t {
     ret = 0x41,           /* pop the result, drop the frame, push the result */
     pop = 0x42,           /* drop the top value */
     reserve = 0x43,       /* u8 count: make room for a function's locals */
+    file_write = 0x50,    /* pop text, pop name: replace the file, push 1 or 0 */
+    file_append = 0x51,   /* pop text, pop name: add to the end, push 1 or 0 */
+    file_print = 0x52,    /* pop name: print the file, push 1 or 0 */
+    file_list = 0x53,     /* print every file, push how many there are */
     halt = 0xFF,
 };
 
@@ -43,6 +48,7 @@ constexpr unsigned int max_globals = 255;
 constexpr unsigned int max_stack = 512;
 constexpr unsigned int max_frames = 64;
 constexpr unsigned int max_text = 128; /* including the null */
+constexpr unsigned int max_file = 32768;
 
 /* a value is either a number or a piece of text. */
 enum class Kind : std::uint8_t { number, text };
@@ -65,6 +71,7 @@ Frame frames[max_frames];
 unsigned int sp = 0;          /* next free stack slot */
 unsigned int base = 0;        /* first local of the current function */
 unsigned int frame_count = 0;
+unsigned char file_buffer[max_file]; /* for reading and appending files */
 
 /**
  * print an error and stop the cpu.
@@ -338,6 +345,76 @@ void relative_jump(std::size_t& pc, std::size_t code_size, std::int32_t offset) 
 }
 
 /**
+ * @param value value that has to be text
+ * @return its text
+ */
+const char* expect_text(const Value& value) {
+    if (value.kind != Kind::text) panic("expected text, got a number");
+    return value.text;
+}
+
+/**
+ * replace a file, or add to its end.
+ * @param name file name
+ * @param text what to write
+ * @param append keep what's already in the file
+ * @return true if it worked
+ */
+bool save_file(const char* name, const Value& text, bool append) {
+    /* main.gex is the program we're running, don't let it break itself. */
+    const char* protected_name = "main.gex";
+    unsigned int i = 0;
+    while (name[i] != '\0' && name[i] == protected_name[i]) ++i;
+    if (name[i] == '\0' && protected_name[i] == '\0') return false;
+
+    std::size_t length = 0;
+    if (append && !gofs::read_file(name, file_buffer, max_file, length)) {
+        length = 0; /* no such file yet, start a new one */
+    }
+    char converted[max_text];
+    const unsigned int added = to_text(text, converted);
+    if (length + added > max_file) return false;
+    for (unsigned int j = 0; j < added; ++j) {
+        file_buffer[length + j] = static_cast<unsigned char>(converted[j]);
+    }
+    return gofs::write_file(name, file_buffer, length + added);
+}
+
+/**
+ * print a file's contents.
+ * @param name file name
+ * @return false if there's no such file
+ */
+bool print_file(const char* name) {
+    std::size_t length = 0;
+    if (!gofs::read_file(name, file_buffer, max_file, length)) return false;
+    for (std::size_t i = 0; i < length; ++i) console::put_char(static_cast<char>(file_buffer[i]));
+    return true;
+}
+
+/**
+ * print every file with its size, one per line.
+ * @return how many files there are
+ */
+std::int32_t list_files() {
+    char name[gofs::max_name + 1];
+    std::size_t size = 0;
+    unsigned int index = 0;
+    while (gofs::file_info(index, name, size)) {
+        /* pad names so the sizes line up. */
+        unsigned int length = 0;
+        while (name[length] != '\0') console::put_char(name[length++]);
+        while (length++ <= gofs::max_name) console::put_char(' ');
+        Value number;
+        set_number(number, static_cast<std::int32_t>(size));
+        print_value(number);
+        console::write(size == 1 ? " byte\n" : " bytes\n");
+        ++index;
+    }
+    return static_cast<std::int32_t>(index);
+}
+
+/**
  * find a local in the current frame.
  * @param index local number
  * @return the stack slot holding it
@@ -534,6 +611,24 @@ Value& local(unsigned int index) {
             for (unsigned int i = 0; i < count; ++i) set_number(push_slot(), 0);
             break;
         }
+        case file_write:
+        case file_append: {
+            const Value& text = pop_value();
+            if (sp == 0) panic("stack underflow");
+            Value& name = stack[sp - 1];
+            const bool ok = save_file(expect_text(name), text, opcode == file_append);
+            set_number(name, ok ? 1 : 0);
+            break;
+        }
+        case file_print: {
+            if (sp == 0) panic("stack underflow");
+            Value& name = stack[sp - 1];
+            set_number(name, print_file(expect_text(name)) ? 1 : 0);
+            break;
+        }
+        case file_list:
+            set_number(push_slot(), list_files());
+            break;
         case clear_screen:
             console::clear();
             break;

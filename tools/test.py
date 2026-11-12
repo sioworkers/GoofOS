@@ -5,6 +5,7 @@ import difflib
 import glob
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -35,6 +36,14 @@ STEPS: list[tuple[str | None, str | None, str | None]] = [
     ("fact", None, "n:"),
     ("10", "10! = 3628800", ">"),
     ("nope", "unknown command 'nope', try help", ">"),
+    ("write", None, "File Name:"),
+    ("notes", "Text (Type EOF to write):", "Text (Type EOF to write):"),
+    ("Hello GoofOS", None, "Hello GoofOS"),
+    ("EOF", "saved notes", ">"),
+    ("cls", None, ">"),
+    ("read", None, "File Name:"),
+    ("notes", "Hello GoofOS", ">"),
+    ("files", "13 bytes", ">"),
     ("halt", "bye!", None),
 ]
 
@@ -124,6 +133,10 @@ def last_line(lines: list[str]) -> str:
 def boot_check(image: str) -> int:
     """boot an image and run the scripted shell interaction."""
     with tempfile.TemporaryDirectory() as tmp:
+        # the shell writes files, so boot a copy and leave the real image alone
+        copy = os.path.join(tmp, "goofos.img")
+        _ = shutil.copyfile(image, copy)
+        image = copy
         sock_path = os.path.join(tmp, "monitor.sock")
         qemu = subprocess.Popen([
             "qemu-system-i386", "-display", "none", "-no-reboot",

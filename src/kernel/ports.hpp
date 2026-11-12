@@ -21,4 +21,24 @@ namespace ports {
         asm volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
         return value;
     }
+
+    /**
+     * read a 16-bit value from an i/o port.
+     * @param port port number
+     * @return the value
+     */
+    inline unsigned short read_word(unsigned short port) {
+        unsigned short value;
+        asm volatile("inw %1, %0" : "=a"(value) : "Nd"(port));
+        return value;
+    }
+
+    /**
+     * write a 16-bit value to an i/o port.
+     * @param port port number
+     * @param value value to send
+     */
+    inline void write_word(unsigned short port, unsigned short value) {
+        asm volatile("outw %0, %1" : : "a"(value), "Nd"(port));
+    }
 }

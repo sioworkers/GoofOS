@@ -1,0 +1,31 @@
+# files on GoFS. every run starts by overwriting, so reruns on the same
+# image give the same output.
+
+output file_write("t.txt", "one\n")       #> 1
+output file_append("t.txt", "two\n")      #> 1
+output file_append("t.txt", 42)           #> 1
+ok = file_print("t.txt")                  #> one
+                                          #> two
+output ""                                 #> 42
+output ok                                 #> 1
+
+# missing files, bad names and the running program can't be touched
+output file_print("missing")              #> 0
+output file_write("main.gex", "x")        #> 0
+output file_write("", "x")                #> 0
+output file_write("a_name_that_is_way_too_long", "x")  #> 0
+
+# grow "a" past one sector so it has to move past "b", then make sure
+# "b" wasn't overwritten on the way
+x = file_write("a", "aaa")
+x = file_write("b", "bbb")
+i = 0
+grow:
+x = file_append("a", "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789")
+i = i + 1
+if i < 6 goto grow
+ok = file_print("b")                      #> bbb
+output ""
+x = file_write("a", "short again")
+ok = file_print("a")                      #> short again
+output ""
