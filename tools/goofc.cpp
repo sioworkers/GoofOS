@@ -253,6 +253,7 @@ enum Opcode : std::uint8_t {
     jump_if = 0x33,
     jump = 0x34,
     clear_screen = 0x35,
+    jump_unless = 0x36,
     call = 0x40,
     ret = 0x41,
     pop = 0x42,
@@ -280,8 +281,8 @@ const std::map<std::string, Builtin> builtins = {
 
 /* words that can't be used as names. */
 const std::set<std::string> keywords = {
-    "func", "end", "return", "goto", "if", "print", "output",
-    "input", "input_line", "clear", "halt",
+    "func", "end", "return", "goto", "if", "else", "while", "break",
+    "continue", "print", "output", "input", "input_line", "clear", "halt",
 };
 
 /* turns tokens into bytecode, one statement per line. */
@@ -303,6 +304,11 @@ public:
                 continue;
             }
             statement();
+        }
+        if (!blocks_.empty()) {
+            const auto& block = blocks_.back();
+            fail("missing end for the " + std::string(block.is_loop ? "while" : "if") +
+                 " on line " + std::to_string(block.line));
         }
         if (in_function_) {
             fail("missing end for func '" + scope_.name + "'");
@@ -359,6 +365,17 @@ private:
     struct Function {
         std::size_t offset; /* where its code starts */
         std::size_t arity;
+    };
+
+    /* an if or while that's waiting for its end. */
+    struct Block {
+        bool is_loop = false;
+        unsigned int line = 0;
+        std::size_t loop_start = 0;  /* while: where the condition starts */
+        std::size_t skip_offset = 0; /* jump past this branch / out of the loop */
+        bool has_skip = false;       /* if: false after a plain else */
+        bool has_else = false;
+        std::vector<std::size_t> end_jumps; /* jumps to the end: else and break */
     };
 
     /* the func we're inside of right now. */
@@ -457,9 +474,11 @@ private:
      *
      *     label:                    goto label
      *     x = expr                  if expr goto label
+     *     if expr                   else / else if expr
+     *     while expr                break / continue
      *     print expr                output expr      (adds a newline)
      *     input x                   input_line x
-     *     func name(a, b)           end
+     *     func name(a, b)           end              (closes func, if or while)
      *     return [expr]             name(args)
      *     clear                     halt
      */
@@ -473,7 +492,11 @@ private:
         } else if (at_word("func")) {
             function_start();
         } else if (at_word("end")) {
-            function_end();
+            if (blocks_.empty()) {
+                function_end();
+            } else {
+                block_end();
+            }
         } else if (at_word("return")) {
             if (!in_function_) {
                 fail("return outside of a func");
@@ -490,13 +513,37 @@ private:
             ++position_;
             emit_jump(jump, consume_name("a label after goto"));
         } else if (at_word("if")) {
+            const auto line = current().line;
             ++position_;
             expression();
-            if (!at_word("goto")) {
-                fail("expected goto after the if condition");
+            if (at_word("goto")) {
+                ++position_;
+                emit_jump(jump_if, consume_name("a label after goto"));
+            } else {
+                Block block;
+                block.line = line;
+                block.skip_offset = emit_forward(jump_unless);
+                block.has_skip = true;
+                blocks_.push_back(std::move(block));
             }
+        } else if (at_word("else")) {
+            else_branch();
+        } else if (at_word("while")) {
+            Block block;
+            block.is_loop = true;
+            block.line = current().line;
             ++position_;
-            emit_jump(jump_if, consume_name("a label after goto"));
+            block.loop_start = code_.size();
+            expression();
+            block.skip_offset = emit_forward(jump_unless);
+            blocks_.push_back(std::move(block));
+        } else if (at_word("break")) {
+            ++position_;
+            innermost_loop("break").end_jumps.push_back(emit_forward(jump));
+        } else if (at_word("continue")) {
+            ++position_;
+            const auto start = innermost_loop("continue").loop_start;
+            patch_relative(emit_forward(jump), start, current().line);
         } else if (at_word("print")) {
             ++position_;
             expression();
@@ -544,6 +591,9 @@ private:
         if (in_function_) {
             fail("a func can't be inside another func");
         }
+        if (!blocks_.empty()) {
+            fail("a func can't be inside an if or while");
+        }
         ++position_;
         Scope scope;
         scope.name = consume_name("a func name");
@@ -588,7 +638,7 @@ private:
      */
     void function_end() {
         if (!in_function_) {
-            fail("end without a func");
+            fail("end without a func, if or while");
         }
         ++position_;
         emit(push_int);
@@ -597,6 +647,76 @@ private:
         code_[scope_.reserve_offset] = static_cast<std::uint8_t>(scope_.locals.size() - scope_.arity);
         patch_relative(scope_.skip_offset, code_.size(), current().line);
         in_function_ = false;
+    }
+
+    /**
+     * compile `else` or `else if expr`: the branch before it jumps to the
+     * end, and the skipped condition lands here.
+     */
+    void else_branch() {
+        if (blocks_.empty() || blocks_.back().is_loop) {
+            fail("else without an if");
+        }
+        auto& block = blocks_.back();
+        if (block.has_else) {
+            fail("nothing can come after a plain else");
+        }
+        ++position_;
+        block.end_jumps.push_back(emit_forward(jump));
+        if (block.has_skip) {
+            patch_relative(block.skip_offset, code_.size(), current().line);
+        }
+        if (at_word("if")) {
+            ++position_;
+            expression();
+            block.skip_offset = emit_forward(jump_unless);
+            block.has_skip = true;
+        } else {
+            block.has_skip = false;
+            block.has_else = true;
+        }
+    }
+
+    /**
+     * compile the `end` of an if or while. a while jumps back to its
+     * condition first.
+     */
+    void block_end() {
+        ++position_;
+        auto block = std::move(blocks_.back());
+        blocks_.pop_back();
+        if (block.is_loop) {
+            patch_relative(emit_forward(jump), block.loop_start, current().line);
+        }
+        if (block.is_loop || block.has_skip) {
+            patch_relative(block.skip_offset, code_.size(), current().line);
+        }
+        for (const auto offset : block.end_jumps) {
+            patch_relative(offset, code_.size(), current().line);
+        }
+    }
+
+    /**
+     * @param word break or continue, for the error message
+     * @return the while we're in
+     */
+    Block& innermost_loop(const char* word) {
+        for (auto block = blocks_.rbegin(); block != blocks_.rend(); ++block) {
+            if (block->is_loop) return *block;
+        }
+        fail(std::string(word) + " outside of a while");
+    }
+
+    /**
+     * append a jump with a placeholder offset to patch later.
+     * @param opcode jump, jump_if or jump_unless
+     * @return where the offset is
+     */
+    std::size_t emit_forward(std::uint8_t opcode) {
+        emit(opcode);
+        const auto offset = code_.size();
+        emit_i32(0);
+        return offset;
     }
 
     /**
@@ -877,6 +997,7 @@ private:
     std::vector<CallFixup> call_fixups_;
     bool in_function_ = false;
     Scope scope_;
+    std::vector<Block> blocks_; /* open ifs and whiles, innermost last */
 };
 
 /**

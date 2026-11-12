@@ -1,0 +1,4 @@
+if 1
+    if 2
+        output 1              #! line 5: missing end for the if on line 1
+    end

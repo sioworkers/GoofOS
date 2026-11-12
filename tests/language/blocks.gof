@@ -1,0 +1,81 @@
+# if / else if / else / while / break / continue blocks
+
+func describe(n)
+    if n < 0
+        return "negative"
+    else if n == 0
+        return "zero"
+    else if n < 10
+        return "small"
+    else
+        return "big"
+    end
+end
+output describe(-3)           #> negative
+output describe(0)            #> zero
+output describe(7)            #> small
+output describe(42)           #> big
+
+# an if without an else just skips its body
+if 0
+    output "never"
+end
+if "x"
+    output "text is true"     #> text is true
+end
+if ""
+    output "never"
+else
+    output "empty is false"   #> empty is false
+end
+
+# while counts, continue skips, break leaves
+i = 0
+while i < 10
+    i = i + 1
+    if i % 2 == 0
+        continue
+    end
+    if i > 7
+        break
+    end
+    print i + " "
+end
+output "done"                 #> 1 3 5 7 done
+
+# nested loops: break only leaves the inner one
+row = 1
+while row <= 3
+    col = 1
+    while 1
+        if col > row
+            break
+        end
+        print "*"
+        col = col + 1
+    end
+    output ""                 #> *
+                              #> **
+                              #> ***
+    row = row + 1
+end
+
+# a loop that never runs, and return from inside a loop
+while 0
+    output "never"
+end
+func first_multiple(of, from)
+    while 1
+        if from % of == 0
+            return from
+        end
+        from = from + 1
+    end
+end
+output first_multiple(7, 30)  #> 35
+
+# the old goto form still works next to blocks
+if 1 goto old
+output "never"
+old:
+output "goto still works"     #> goto still works

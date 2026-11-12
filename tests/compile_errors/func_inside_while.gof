@@ -1,0 +1,4 @@
+while 1
+    func f()                  #! line 2: a func can't be inside an if or while
+    end
+end

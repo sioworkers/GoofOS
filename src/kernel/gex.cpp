@@ -33,6 +33,7 @@ enum Opcode : std::uint8_t {
     jump_if = 0x33,       /* i32 offset: pop, jump if truthy */
     jump = 0x34,          /* i32 offset */
     clear_screen = 0x35,
+    jump_unless = 0x36,   /* i32 offset: pop, jump if falsy */
     call = 0x40,          /* i32 offset + u8 arg count */
     ret = 0x41,           /* pop the result, drop the frame, push the result */
     pop = 0x42,           /* drop the top value */
@@ -572,6 +573,11 @@ Value& local(unsigned int index) {
         case jump_if: {
             const auto offset = static_cast<std::int32_t>(read_u32(code, code_size, pc));
             if (is_truthy(pop_value())) relative_jump(pc, code_size, offset);
+            break;
+        }
+        case jump_unless: {
+            const auto offset = static_cast<std::int32_t>(read_u32(code, code_size, pc));
+            if (!is_truthy(pop_value())) relative_jump(pc, code_size, offset);
             break;
         }
         case jump: {

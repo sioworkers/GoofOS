@@ -12,36 +12,45 @@ func show_help()
     output "halt   stop the cpu"
 end
 
+# adds a line and its newline, gives 0 if the disk is full
+func append_line(name, line)
+    if file_append(name, line) == 0
+        return 0
+    end
+    return file_append(name, "\n")
+end
+
 # asks for a name, then saves every line until EOF into that file
 func edit_file()
     print "File Name: "
     input_line name
-    if name == "" goto done
-    if file_write(name, "") goto start
-    output "can't write '" + name + "'"
-    return
-    start:
+    if name == ""
+        return
+    end
+    if file_write(name, "") == 0
+        output "can't write '" + name + "'"
+        return
+    end
     output "Text (Type EOF to write):"
-    next:
-    input_line line
-    if line == "EOF" goto saved
-    if file_append(name, line) == 0 goto full
-    if file_append(name, "\n") == 0 goto full
-    goto next
-    full:
-    output "disk full, '" + name + "' is cut short"
-    return
-    saved:
+    while 1
+        input_line line
+        if line == "EOF"
+            break
+        end
+        if append_line(name, line) == 0
+            output "disk full, '" + name + "' is cut short"
+            return
+        end
+    end
     output "saved " + name
-    done:
 end
 
 func show_file()
     print "File Name: "
     input_line name
-    if file_print(name) goto done
-    output "no file '" + name + "'"
-    done:
+    if file_print(name) == 0
+        output "no file '" + name + "'"
+    end
 end
 
 func ask_number(prompt)
@@ -51,75 +60,52 @@ func ask_number(prompt)
 end
 
 func greet(name)
-    if name == "" goto nobody
-    output "hi " + name + "!"
-    return
-    nobody:
-    output "hi, whoever you are"
+    if name == ""
+        output "hi, whoever you are"
+    else
+        output "hi " + name + "!"
+    end
 end
 
 func factorial(n)
-    if n > 1 goto more
+    if n > 1
+        return n * factorial(n - 1)
+    end
     return 1
-    more:
-    return n * factorial(n - 1)
 end
 
 output "type help for commands"
 
-loop:
-print "> "
-input_line command
-if command == "" goto loop
-if command == "help" goto help
-if command == "add" goto add
-if command == "greet" goto greet
-if command == "fact" goto fact
-if command == "write" goto write
-if command == "read" goto read
-if command == "files" goto files
-if command == "cls" goto cls
-if command == "halt" goto stop
-output "unknown command '" + command + "', try help"
-goto loop
-
-help:
-show_help()
-goto loop
-
-add:
-a = ask_number("a: ")
-b = ask_number("b: ")
-output a + " + " + b + " = " + (a + b)
-goto loop
-
-greet:
-print "name: "
-input_line name
-greet(name)
-goto loop
-
-fact:
-n = ask_number("n: ")
-output n + "! = " + factorial(n)
-goto loop
-
-write:
-edit_file()
-goto loop
-
-read:
-show_file()
-goto loop
-
-files:
-file_list()
-goto loop
-
-cls:
-clear
-goto loop
-
-stop:
-output "bye!"
-halt
+while 1
+    print "> "
+    input_line command
+    if command == ""
+        continue
+    else if command == "help"
+        show_help()
+    else if command == "add"
+        a = ask_number("a: ")
+        b = ask_number("b: ")
+        output a + " + " + b + " = " + (a + b)
+    else if command == "greet"
+        print "name: "
+        input_line name
+        greet(name)
+    else if command == "fact"
+        n = ask_number("n: ")
+        output n + "! = " + factorial(n)
+    else if command == "write"
+        edit_file()
+    else if command == "read"
+        show_file()
+    else if command == "files"
+        file_list()
+    else if command == "cls"
+        clear
+    else if command == "halt"
+        output "bye!"
+        halt
+    else
+        output "unknown command '" + command + "', try help"
+    end
+end
