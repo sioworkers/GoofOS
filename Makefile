@@ -32,13 +32,15 @@ $(BUILD)/boot.bin: $(BUILD)/boot.elf
 	test "$$(wc -c < $@)" -eq 512
 
 $(BUILD)/kernel.o: src/kernel/kernel.cpp src/kernel/console.hpp src/kernel/gex.hpp \
-	src/kernel/gofs.hpp src/kernel/idt.hpp src/kernel/irq.hpp src/kernel/serial.hpp | $(BUILD)
+	src/kernel/gofs.hpp src/kernel/idt.hpp src/kernel/irq.hpp src/kernel/keyboard.hpp \
+	src/kernel/serial.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/console.o: src/kernel/console.cpp src/kernel/console.hpp src/kernel/ports.hpp src/kernel/serial.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD)/keyboard.o: src/kernel/keyboard.cpp src/kernel/keyboard.hpp src/kernel/ports.hpp | $(BUILD)
+$(BUILD)/keyboard.o: src/kernel/keyboard.cpp src/kernel/keyboard.hpp src/kernel/irq.hpp \
+	src/kernel/ports.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/serial.o: src/kernel/serial.cpp src/kernel/serial.hpp src/kernel/ports.hpp | $(BUILD)

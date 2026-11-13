@@ -3,6 +3,7 @@
 #include "gex.hpp"
 #include "idt.hpp"
 #include "irq.hpp"
+#include "keyboard.hpp"
 #include "serial.hpp"
 
 #include <cstddef>
@@ -16,7 +17,8 @@ extern "C" void kernel_main() {
     /* right after the console, so a crash from here on can be printed. */
     idt::initialize();
     irq::initialize();
-    irq::enable(); /* every line is masked until a driver installs a handler */
+    keyboard::initialize(); /* installs its handler, which unmasks irq 1 */
+    irq::enable();
     console::write("Hello from Kernel!\n");
 
     static unsigned char program[32768];
