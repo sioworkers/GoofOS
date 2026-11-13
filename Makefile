@@ -32,7 +32,7 @@ $(BUILD)/boot.bin: $(BUILD)/boot.elf
 	test "$$(wc -c < $@)" -eq 512
 
 $(BUILD)/kernel.o: src/kernel/kernel.cpp src/kernel/console.hpp src/kernel/gex.hpp \
-	src/kernel/gofs.hpp src/kernel/serial.hpp | $(BUILD)
+	src/kernel/gofs.hpp src/kernel/idt.hpp src/kernel/irq.hpp src/kernel/serial.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/console.o: src/kernel/console.cpp src/kernel/console.hpp src/kernel/ports.hpp src/kernel/serial.hpp | $(BUILD)
@@ -54,6 +54,15 @@ $(BUILD)/gex.o: src/kernel/gex.cpp src/kernel/gex.hpp src/kernel/console.hpp src
 	src/kernel/gofs.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
+$(BUILD)/idt.o: src/kernel/idt.cpp src/kernel/idt.hpp src/kernel/console.hpp | $(BUILD)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/irq.o: src/kernel/irq.cpp src/kernel/irq.hpp src/kernel/idt.hpp src/kernel/ports.hpp | $(BUILD)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/interrupts.o: src/kernel/interrupts.s | $(BUILD)
+	$(CC) -m32 -c $< -o $@
+
 $(BUILD)/kernel_entry.o: src/kernel/entry.s | $(BUILD)
 	$(CC) -m32 -c $< -o $@
 
@@ -66,7 +75,8 @@ $(BUILD)/main.gex: $(PROGRAM) $(GOOFC) | $(BUILD)
 	$(GOOFC) $< -o $@
 
 KERNEL_OBJS := $(BUILD)/kernel_entry.o $(BUILD)/kernel.o $(BUILD)/console.o \
-	$(BUILD)/keyboard.o $(BUILD)/serial.o $(BUILD)/disk.o $(BUILD)/gofs.o $(BUILD)/gex.o
+	$(BUILD)/keyboard.o $(BUILD)/serial.o $(BUILD)/disk.o $(BUILD)/gofs.o $(BUILD)/gex.o \
+	$(BUILD)/idt.o $(BUILD)/irq.o $(BUILD)/interrupts.o
 
 $(BUILD)/kernel.elf: $(KERNEL_OBJS) kernel.ld
 	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(KERNEL_OBJS)
