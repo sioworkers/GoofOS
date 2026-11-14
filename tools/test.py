@@ -44,6 +44,9 @@ STEPS: list[tuple[str | None, str | None, str | None]] = [
     ("read", None, "File Name:"),
     ("notes", "Hello GoofOS", ">"),
     ("files", "13 bytes", ">"),
+    ("uptime", "up ", ">"),
+    ("sleep", None, "ms:"),
+    ("300", None, ">"),
     ("halt", "bye!", None),
 ]
 
@@ -217,6 +220,18 @@ def read_file(path: str) -> str:
         return ""
 
 
+def finished(registers: str) -> bool:
+    """true once the cpu is halted for good: in hlt with interrupts off.
+
+    the kernel also halts while it waits for a timer tick or a key, but with
+    interrupts on, and a program only ever stops with them off (cli).
+    """
+    flags = re.search(r"EFL=([0-9a-f]+)", registers)
+    if flags is None or "HLT=1" not in registers:
+        return False
+    return int(flags.group(1), 16) & 0x200 == 0
+
+
 def boot_program(image: str, log_path: str) -> str:
     """boot a test image until it halts and return its serial output."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -232,7 +247,7 @@ def boot_program(image: str, log_path: str) -> str:
             deadline = time.time() + TEST_TIMEOUT
             while True:
                 log = read_file(log_path)
-                if KERNEL_HELLO in log and "HLT=1" in monitor.command("info registers"):
+                if KERNEL_HELLO in log and finished(monitor.command("info registers")):
                     return log
                 if time.time() > deadline:
                     raise TimeoutError(f"no halt after {TEST_TIMEOUT}s, serial so far:\n{log}")

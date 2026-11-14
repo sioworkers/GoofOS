@@ -5,6 +5,7 @@
 #include "irq.hpp"
 #include "keyboard.hpp"
 #include "serial.hpp"
+#include "timer.hpp"
 
 #include <cstddef>
 
@@ -18,6 +19,7 @@ extern "C" void kernel_main() {
     idt::initialize();
     irq::initialize();
     keyboard::initialize(); /* installs its handler, which unmasks irq 1 */
+    timer::initialize();    /* same for irq 0 */
     irq::enable();
     console::write("Hello from Kernel!\n");
 

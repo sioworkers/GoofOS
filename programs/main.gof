@@ -8,6 +8,8 @@ func show_help()
     output "write  write a file"
     output "read   show a file"
     output "files  list files"
+    output "uptime show time since boot"
+    output "sleep  wait for a while"
     output "cls    clear the screen"
     output "halt   stop the cpu"
 end
@@ -100,6 +102,10 @@ while 1
         show_file()
     else if command == "files"
         file_list()
+    else if command == "uptime"
+        output "up " + uptime() / 1000 + "s"
+    else if command == "sleep"
+        sleep(ask_number("ms: "))
     else if command == "cls"
         clear
     else if command == "halt"

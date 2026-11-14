@@ -1,0 +1,20 @@
+# sleep() waits at least as long as asked, uptime() counts milliseconds
+# since boot (in 10ms steps)
+
+a = uptime()
+sleep(50)
+b = uptime()
+sleep(50)
+c = uptime()
+output a < b                  #> 1
+output b < c                  #> 1
+
+start = uptime()
+output sleep(200)             #> 0
+elapsed = uptime() - start
+output elapsed >= 200         #> 1
+output elapsed < 1500         #> 1
+
+# sleep(0) comes back right away
+sleep(0)
+output "awake"                #> awake

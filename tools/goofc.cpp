@@ -262,6 +262,8 @@ enum Opcode : std::uint8_t {
     file_append = 0x51,
     file_print = 0x52,
     file_list = 0x53,
+    sleep_ms = 0x54,
+    uptime_ms = 0x55,
     halt = 0xFF,
 };
 
@@ -277,6 +279,8 @@ const std::map<std::string, Builtin> builtins = {
     {"file_append", {file_append, 2}}, /* file_append(name, text) -> 1 or 0 */
     {"file_print", {file_print, 1}},   /* file_print(name) -> 1 or 0 */
     {"file_list", {file_list, 0}},     /* file_list() -> number of files */
+    {"sleep", {sleep_ms, 1}},          /* sleep(ms) -> 0 */
+    {"uptime", {uptime_ms, 0}},        /* uptime() -> ms since boot */
 };
 
 /* words that can't be used as names. */

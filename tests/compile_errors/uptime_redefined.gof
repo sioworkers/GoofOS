@@ -1,0 +1,2 @@
+func uptime()                  #! line 1: 'uptime' is a built-in func, pick another name
+end

@@ -33,7 +33,7 @@ $(BUILD)/boot.bin: $(BUILD)/boot.elf
 
 $(BUILD)/kernel.o: src/kernel/kernel.cpp src/kernel/console.hpp src/kernel/gex.hpp \
 	src/kernel/gofs.hpp src/kernel/idt.hpp src/kernel/irq.hpp src/kernel/keyboard.hpp \
-	src/kernel/serial.hpp | $(BUILD)
+	src/kernel/serial.hpp src/kernel/timer.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/console.o: src/kernel/console.cpp src/kernel/console.hpp src/kernel/ports.hpp src/kernel/serial.hpp | $(BUILD)
@@ -53,7 +53,10 @@ $(BUILD)/gofs.o: src/kernel/gofs.cpp src/kernel/gofs.hpp src/kernel/disk.hpp | $
 	$(CC) $(CXXFLAGS) -DGOFS_START_SECTOR=$(GOFS_START_SECTOR) -c $< -o $@
 
 $(BUILD)/gex.o: src/kernel/gex.cpp src/kernel/gex.hpp src/kernel/console.hpp src/kernel/keyboard.hpp \
-	src/kernel/gofs.hpp | $(BUILD)
+	src/kernel/gofs.hpp src/kernel/timer.hpp | $(BUILD)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/timer.o: src/kernel/timer.cpp src/kernel/timer.hpp src/kernel/irq.hpp src/kernel/ports.hpp | $(BUILD)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD)/idt.o: src/kernel/idt.cpp src/kernel/idt.hpp src/kernel/console.hpp | $(BUILD)
@@ -78,7 +81,7 @@ $(BUILD)/main.gex: $(PROGRAM) $(GOOFC) | $(BUILD)
 
 KERNEL_OBJS := $(BUILD)/kernel_entry.o $(BUILD)/kernel.o $(BUILD)/console.o \
 	$(BUILD)/keyboard.o $(BUILD)/serial.o $(BUILD)/disk.o $(BUILD)/gofs.o $(BUILD)/gex.o \
-	$(BUILD)/idt.o $(BUILD)/irq.o $(BUILD)/interrupts.o
+	$(BUILD)/idt.o $(BUILD)/irq.o $(BUILD)/timer.o $(BUILD)/interrupts.o
 
 $(BUILD)/kernel.elf: $(KERNEL_OBJS) kernel.ld
 	$(LD) -m elf_i386 -T kernel.ld -nostdlib -o $@ $(KERNEL_OBJS)

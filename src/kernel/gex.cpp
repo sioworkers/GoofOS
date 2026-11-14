@@ -2,6 +2,7 @@
 #include "gex.hpp"
 #include "gofs.hpp"
 #include "keyboard.hpp"
+#include "timer.hpp"
 
 #include <cstdint>
 
@@ -42,6 +43,8 @@ enum Opcode : std::uint8_t {
     file_append = 0x51,   /* pop text, pop name: add to the end, push 1 or 0 */
     file_print = 0x52,    /* pop name: print the file, push 1 or 0 */
     file_list = 0x53,     /* print every file, push how many there are */
+    sleep_ms = 0x54,      /* pop milliseconds, wait, push 0 */
+    uptime_ms = 0x55,     /* push milliseconds since boot */
     halt = 0xFF,
 };
 
@@ -634,6 +637,18 @@ Value& local(unsigned int index) {
         }
         case file_list:
             set_number(push_slot(), list_files());
+            break;
+        case sleep_ms: {
+            if (sp == 0) panic("stack underflow");
+            Value& value = stack[sp - 1];
+            const auto ms = expect_number(value);
+            if (ms < 0) panic("can't sleep for a negative time");
+            timer::sleep(static_cast<std::uint32_t>(ms));
+            set_number(value, 0);
+            break;
+        }
+        case uptime_ms:
+            set_number(push_slot(), static_cast<std::int32_t>(timer::uptime_ms()));
             break;
         case clear_screen:
             console::clear();
